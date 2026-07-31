@@ -28,7 +28,7 @@ jobs:
 
       - name: Functions unit tests
         run: |
-          pnpm --dir functions test
+          pnpm --dir functions test:unit
 
       - name: Audit dependencies
         run: |
