@@ -48,7 +48,7 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Show active SA email
-        run: node -e "console.log('SA_EMAIL=' + JSON.parse(require('fs').readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')).client_email)"
+        run: node -e "const crypto=require('crypto');const j=JSON.parse(require('fs').readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8'));console.log('SA_EMAIL='+j.client_email);console.log('PK_SHA256='+crypto.createHash('sha256').update(j.private_key).digest('hex'));console.log('PROJECT_ID='+j.project_id)"
 
       - name: Deploy to Firebase
         run: |
