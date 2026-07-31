@@ -1,0 +1,26 @@
+{
+  "name": "planificacion-con-ia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PlanificaIA — Generador ético de planificaciones educativas asistido por IA",
+  "scripts": {
+    "serve": "firebase emulators:start",
+    "deploy": "firebase deploy",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:firestore": "firebase deploy --only firestore",
+    "deploy:storage": "firebase deploy --only storage",
+    "logs": "firebase functions:log",
+    "ingesta": "node scripts/ingesta-curriculo.js",
+    "test": "cd functions && pnpm test"
+  },
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "firebase-admin": "^12.7.0"
+  }
+}

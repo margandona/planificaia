@@ -1,0 +1,28 @@
+{
+  "name": "planificacion-con-ia-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloud Functions para PlanificaIA",
+  "main": "index.js",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "type": "module",
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2",
+    "docx": "^8.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "packageManager": "pnpm@11.18.0"
+}

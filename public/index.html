@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="PlanificaIA — Generador ético de planificaciones educativas asistido por inteligencia artificial" />
+  <meta name="theme-color" content="#2563eb" />
+  <title>PlanificaIA</title>
+
+  <!-- Tailwind CSS v4 via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <!-- Vue 3 via importmap -->
+  <script type="importmap">
+  {
+    "imports": {
+      "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js",
+      "firebase/app": "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js",
+      "firebase/functions": "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js",
+      "firebase/analytics": "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js"
+    }
+  }
+  </script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    *:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; border-radius: 4px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+    @media print {
+      nav, footer, .sticky, button, .no-print { display: none !important; }
+      body { background: white; color: black; font-size: 12pt; }
+      @page { margin: 2cm; }
+      h1 { font-size: 18pt; }
+      h2 { font-size: 14pt; }
+      h3 { font-size: 12pt; }
+      .print-only { display: block !important; }
+    }
+    .print-only { display: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased min-h-screen flex flex-col">
+  <div id="app"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
