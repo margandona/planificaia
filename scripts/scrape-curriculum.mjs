@@ -17,22 +17,31 @@ import { getFirestore } from 'firebase-admin/firestore';
 // Los overrides son para 3o-4o medio, donde los slugs de asignatura cambian por nivel.
 const GROUPS = {
   '1o-6o-basico': [
+    ['1-basico', '1-basico'],
+    ['2-basico', '2-basico'],
+    ['3-basico', '3-basico'],
+    ['4-basico', '4-basico'],
     ['5-basico', '5-basico'],
     ['6-basico', '6-basico'],
   ],
-  '7o-basico-2-medio': [
+  '7o-basico-2o-medio': [
     ['7-basico', '7-basico'],
     ['8-basico', '8-basico'],
     ['1-medio', '1-medio'],
     ['2-medio', '2-medio'],
   ],
   '3o-4o-medio': [
-    ['3-medio', '3-medio-fg', {
+    [    '3-medio', '3-medio-fg', {
       'matematica': 'matematica-3o-medio',
       'lenguaje-y-comunicacion': 'lengua-literatura-3o-medio',
       'ciencias-naturales': 'ambiente-sostenibilidad',
       'historia-geografia-ciencias-sociales': 'chile-region-latinoamericana',
       'ingles': 'ingles-3o-medio',
+      'filosofia': 'filosofia-3-medio',
+      'educacion-ciudadana': 'educacion-ciudadana-3-medio',
+      'artes-visuales': 'artes-visuales',
+      'musica': 'musica',
+      'educacion-fisica-salud': 'educacion-fisica-salud-1',
     }],
     ['4-medio', '4-medio-fg', {
       'matematica': 'matematica-4o-medio',
@@ -40,6 +49,11 @@ const GROUPS = {
       'ciencias-naturales': 'bienestar-salud',
       'historia-geografia-ciencias-sociales': 'mundo-global',
       'ingles': 'ingles-4o-medio',
+      'filosofia': 'filosofia-4o-medio',
+      'educacion-ciudadana': 'educacion-ciudadana-4-medio',
+      'artes-visuales': 'artes-visuales',
+      'musica': 'musica',
+      'educacion-fisica-salud': 'educacion-fisica-salud-2',
     }],
   ],
 };
@@ -52,13 +66,23 @@ const SUBJECT_SLUGS = {
     'ciencias-naturales': 'ciencias-naturales',
     'historia-geografia-ciencias-sociales': 'historia-geografia-ciencias-sociales',
     'ingles': 'ingles',
+    'artes-visuales': 'artes-visuales',
+    'educacion-fisica-salud': 'educacion-fisica-salud',
+    'musica': 'musica',
+    'orientacion': 'orientacion',
+    'tecnologia': 'tecnologia',
   },
-  '7o-basico-2-medio': {
+  '7o-basico-2o-medio': {
     'matematica': 'matematica',
     'lenguaje-y-comunicacion': 'lengua-literatura',
     'ciencias-naturales': 'ciencias-naturales',
     'historia-geografia-ciencias-sociales': 'historia-geografia-ciencias-sociales',
     'ingles': 'ingles',
+    'artes-visuales': 'artes-visuales',
+    'educacion-fisica-salud': 'educacion-fisica-salud',
+    'musica': 'musica',
+    'orientacion': 'orientacion',
+    'tecnologia': 'tecnologia',
   },
   '3o-4o-medio': {},
 };
@@ -69,6 +93,13 @@ const SUBJECT_NAMES = {
   'ciencias-naturales': 'Ciencias Naturales',
   'historia-geografia-ciencias-sociales': 'Historia, Geografia y Cs. Sociales',
   'ingles': 'Ingles',
+  'artes-visuales': 'Artes Visuales',
+  'educacion-fisica-salud': 'Educacion Fisica y Salud',
+  'musica': 'Musica',
+  'orientacion': 'Orientacion',
+  'tecnologia': 'Tecnologia',
+  'filosofia': 'Filosofia',
+  'educacion-ciudadana': 'Educacion Ciudadana',
 };
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -92,6 +123,13 @@ function stripHtml(html) {
     .replace(/[\t ]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n')
     .trim();
+}
+
+// ID determinístico para que la ingesta sea idempotente (re-ejecutar no duplica)
+function docId(subject, level, type, code) {
+  return [subject, level, type, code]
+    .map(part => part.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''))
+    .join('_');
 }
 
 // Parsea el HTML crudo de una página de asignatura/nivel
@@ -154,7 +192,20 @@ async function fetchPage(url) {
 
 // ─── Ingesta ─────────────────────────────────────────────
 
-const ALL_SUBJECTS = Object.keys(SUBJECT_SLUGS['7o-basico-2-medio']);
+const ALL_SUBJECTS = [
+  'matematica',
+  'lenguaje-y-comunicacion',
+  'ciencias-naturales',
+  'historia-geografia-ciencias-sociales',
+  'ingles',
+  'artes-visuales',
+  'educacion-fisica-salud',
+  'musica',
+  'orientacion',
+  'tecnologia',
+  'filosofia',
+  'educacion-ciudadana',
+];
 
 async function ingest(subjects = ALL_SUBJECTS, dryRun = false) {
   let db = null;
@@ -165,6 +216,7 @@ async function ingest(subjects = ALL_SUBJECTS, dryRun = false) {
 
   let totalOA = 0, totalSkill = 0, totalAtt = 0;
   const sourceVersion = '2024';
+  const MAX_BATCH = 400;
 
   for (const subject of subjects) {
     for (const [group, levels] of Object.entries(GROUPS)) {
@@ -189,9 +241,11 @@ async function ingest(subjects = ALL_SUBJECTS, dryRun = false) {
           continue;
         }
 
-        // Guardar OA
+        // Guardar OA (id determinístico → idempotente) en lotes
+        const writes = [];
+        const makeRef = (type, code) => db.collection('curriculum').doc(docId(subject, level, type, code));
         for (const oa of parsed.objectives) {
-          await db.collection('curriculum').add({
+          writes.push([makeRef('oa', oa.code), {
             code: oa.code,
             text: oa.text,
             axis: oa.axis || '',
@@ -203,24 +257,30 @@ async function ingest(subjects = ALL_SUBJECTS, dryRun = false) {
             validFrom: new Date('2024-01-01').toISOString(),
             validTo: null,
             createdAt: new Date().toISOString(),
-          });
+          }]);
           totalOA++;
         }
         for (const s of parsed.skills) {
-          await db.collection('curriculum').add({
+          writes.push([makeRef('skill', s.code), {
             type: 'skill', code: s.code, text: s.text, level, subject,
             source: `Bases Curriculares ${sourceVersion}`, version: sourceVersion,
             isActive: true, createdAt: new Date().toISOString(),
-          });
+          }]);
           totalSkill++;
         }
         for (const a of parsed.attitudes) {
-          await db.collection('curriculum').add({
+          writes.push([makeRef('attitude', a.code), {
             type: 'attitude', code: a.code, text: a.text, level, subject,
             source: `Bases Curriculares ${sourceVersion}`, version: sourceVersion,
             isActive: true, createdAt: new Date().toISOString(),
-          });
+          }]);
           totalAtt++;
+        }
+
+        for (let i = 0; i < writes.length; i += MAX_BATCH) {
+          const batch = db.batch();
+          writes.slice(i, i + MAX_BATCH).forEach(([ref, data]) => batch.set(ref, data));
+          await batch.commit();
         }
         console.log(`  [OK] ${subject}/${level}: ${parsed.objectives.length} OA, ${parsed.skills.length} skills, ${parsed.attitudes.length} atts`);
       }

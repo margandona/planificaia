@@ -32,6 +32,13 @@ const DEFAULT_SUBJECTS = [
   { key: 'matematica', name: 'Matemática', icon: '🔢', active: true },
   { key: 'ciencias-naturales', name: 'Ciencias Naturales', icon: '🔬', active: true },
   { key: 'ingles', name: 'Inglés', icon: '🌎', active: true },
+  { key: 'artes-visuales', name: 'Artes Visuales', icon: '🎨', active: true },
+  { key: 'musica', name: 'Música', icon: '🎵', active: true },
+  { key: 'educacion-fisica-salud', name: 'Educación Física y Salud', icon: '⚽', active: true },
+  { key: 'tecnologia', name: 'Tecnología', icon: '💻', active: true },
+  { key: 'orientacion', name: 'Orientación', icon: '🧭', active: true },
+  { key: 'filosofia', name: 'Filosofía', icon: '🧠', active: true },
+  { key: 'educacion-ciudadana', name: 'Educación Ciudadana', icon: '🗳️', active: true },
 ];
 
 const store = reactive({
@@ -50,9 +57,13 @@ const approvePlanningFn = httpsCallable(fx, 'approvePlanning');
 const exportPlanningFn = httpsCallable(fx, 'exportPlanning');
 const submitFeedbackFn = httpsCallable(fx, 'submitFeedback');
 
-// ──────────── Catálogo curricular (5° básico → 4° medio) ────────────
+// ──────────── Catálogo curricular (1° básico → 4° medio) ────────────
 
 const LEVELS = [
+  ['1-basico', '1° básico'],
+  ['2-basico', '2° básico'],
+  ['3-basico', '3° básico'],
+  ['4-basico', '4° básico'],
   ['5-basico', '5° básico'],
   ['6-basico', '6° básico'],
   ['7-basico', '7° básico'],
@@ -287,7 +298,7 @@ const RegisterPage = defineComponent({
         go('/verificar-email');
       } catch (e) { error.value = mapError(e.code); } finally { loading.value = false; }
     };
-    const levels = [['5-basico', '5° básico'], ['6-basico', '6° básico'], ['7-basico', '7° básico'], ['8-basico', '8° básico']];
+    const levels = LEVELS;
     const institutions = [['', 'Selecciona...'], ['municipal', 'Municipal'], ['subvencionado', 'Particular Subvencionado'], ['particular', 'Particular Pagado'], ['otro', 'Otro']];
 
     return () => h(Layout, () => h('div', { class: 'min-h-[60vh] flex items-center justify-center' }, [
@@ -431,7 +442,7 @@ const ProfilePage = defineComponent({
         store.user = null; go('/');
       } catch (e) { error.value = 'Error al eliminar cuenta'; } finally { saving.value = false; }
     };
-    const levels = [['5-basico', '5° básico'], ['6-basico', '6° básico'], ['7-basico', '7° básico'], ['8-basico', '8° básico']];
+    const levels = LEVELS;
 
     return () => h(Layout, { title: 'Mi Perfil' }, () => [
       Alert('error', error.value), Alert('success', success.value),
@@ -461,12 +472,14 @@ const WizardPage = defineComponent({
     if (!guard()) return () => null;
     const step = ref(1);
     const data = reactive({ title: '', level: '', subject: '', oaIds: [], duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
-    const oas = ref([]); const planning = ref(null); const generating = ref(false); const error = ref('');
+    const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
     onMounted(() => { loadSubjectCatalog(); });
 
     const loadOAs = async () => {
       if (!data.level) return;
       error.value = '';
+      oasLoading.value = true;
+      oasLoaded.value = false;
       const cacheKey = `curriculum_v2_${data.level}_${data.subject}`;
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
@@ -474,6 +487,8 @@ const WizardPage = defineComponent({
           const parsed = JSON.parse(cached);
           if (parsed.expires > Date.now()) {
             oas.value = parsed.docs;
+            oasLoading.value = false;
+            oasLoaded.value = true;
             return;
           }
         } catch (e) { /* cache corrupto, recargar */ }
@@ -484,12 +499,15 @@ const WizardPage = defineComponent({
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(d => d.isActive !== false && d.type === undefined);
         oas.value = docs;
+        oasLoaded.value = true;
         try {
           localStorage.setItem(cacheKey, JSON.stringify({ docs, expires: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
         } catch (e) { /* localStorage lleno/privado */ }
       } catch (e) {
         console.error(e);
         error.value = 'Error al cargar OA. Verifica la conexión.';
+      } finally {
+        oasLoading.value = false;
       }
     };
     const toggleOA = (id) => { const i = data.oaIds.indexOf(id); if (i >= 0) data.oaIds.splice(i, 1); else if (data.oaIds.length < 4) data.oaIds.push(id); };
@@ -552,7 +570,8 @@ const WizardPage = defineComponent({
       ]),
       error.value ? h('div', { class: 'text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded' }, error.value) : null,
       data.oaIds.length > 0 ? h('p', { class: 'text-xs text-green-600' }, `✓ ${data.oaIds.length} OA seleccionado(s)`) : null,
-      oas.value.length === 0 && data.level ? h('p', { class: 'text-xs text-amber-600' }, 'Cargando OA...') : null,
+      oasLoading.value ? h('p', { class: 'text-xs text-amber-600' }, 'Cargando OA...') : null,
+      oasLoaded.value && oas.value.length === 0 ? h('p', { class: 'text-xs text-amber-600' }, 'No hay OA para esta asignatura y nivel. Intenta otra combinación.') : null,
       h('div', { class: 'max-h-60 overflow-y-auto space-y-1 border rounded-lg p-2' }, oas.value.map(oa =>
         h('label', { class: 'flex items-start gap-2 p-2 rounded hover:bg-slate-50 cursor-pointer text-sm' }, [
           h('input', { type: 'checkbox', checked: data.oaIds.includes(oa.id), onChange: () => toggleOA(oa.id), class: 'mt-0.5' }),
@@ -990,7 +1009,7 @@ const ManualEditor = defineComponent({
       }
       return w;
     };
-    const levels = [['5-basico', '5° básico'], ['6-basico', '6° básico'], ['7-basico', '7° básico'], ['8-basico', '8° básico']];
+    const levels = LEVELS;
     const moments = ['inicio', 'desarrollo', 'cierre'];
     const momentLabels = { inicio: 'Inicio', desarrollo: 'Desarrollo', cierre: 'Cierre' };
 

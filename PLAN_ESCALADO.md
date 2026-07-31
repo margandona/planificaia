@@ -59,13 +59,15 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 
 | Entregable | Detalle | Esfuerzo |
 |---|---|---|
-| Asignaturas restantes de básica/media | Artes Visuales, Música, Ed. Física, Tecnología, Filosofía, Ed. Ciudadana, Religión, etc. (scraper ya lo soporta) | 2 sem |
+| Asignaturas restantes de básica/media | Artes Visuales, Música, Ed. Física, Tecnología, Orientación, Filosofía, Ed. Ciudadana, Religión, etc. (scraper ya lo soporta) | 2 sem |
 | Parvularia | Nuevo modelo: ámbitos (Formación Personal y Social, Comunicación Integral, Interacción y Comprensión del Entorno) y núcleos, en vez de OA | 1 sem |
 | EPJA | Objetivos de aprendizaje por sector de EPJA | 1 sem |
 | OAT (Objetivos Transversales) | Colección `curriculum/transversal-objectives` pendiente en el modelo | 0.5 sem |
 | Datos por asignatura | Verificar ejes/unidades por nivel para mejorar filtros del wizard | 1 sem |
 
 **Criterio de salida:** >1,500 OA, todos los niveles educativos, selección por nivel/asignatura sin datos vacíos.
+
+**Estado (2026-07-31):** asignaturas de básica/media ingeridas (10 asignaturas × 12 niveles + filosofía/Ed. ciudadana en 3°-4° FG) = **1,434 OA** (2,359 docs totales con habilidades/actitudes). Scraper idempotente (IDs determinísticos). Niveles 1°-4° básico añadidos al wizard y catálogo Firestore (`catalog/subjects` v2, 12 asignaturas). Religión excluida (el portal no estructura sus OA; marco propio por confesión). EPJA no parsea por HTML directo (contenido vía buscador/search-api) — pendiente.
 
 ---
 
