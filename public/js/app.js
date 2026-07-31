@@ -489,6 +489,7 @@ const WizardPage = defineComponent({
     const step = ref(1);
     const data = reactive({ title: '', level: '', subject: '', oaIds: [], duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
     const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
+    const axisFilter = ref('');
     onMounted(() => { loadSubjectCatalog(); });
 
     const loadOAs = async () => {
@@ -527,6 +528,17 @@ const WizardPage = defineComponent({
       }
     };
     const toggleOA = (id) => { const i = data.oaIds.indexOf(id); if (i >= 0) data.oaIds.splice(i, 1); else if (data.oaIds.length < 4) data.oaIds.push(id); };
+
+    const availableAxes = () => {
+      const seen = [];
+      for (const oa of oas.value) {
+        const ax = (oa.axis || '').trim();
+        if (ax && !seen.includes(ax)) seen.push(ax);
+      }
+      return seen.sort();
+    };
+    const filteredOAs = () => axisFilter.value ? oas.value.filter(oa => (oa.axis || '').trim() === axisFilter.value) : oas.value;
+    const resetAxisFilter = () => { axisFilter.value = ''; };
 
     const generate = async () => {
       generating.value = true; error.value = '';
@@ -581,17 +593,18 @@ const WizardPage = defineComponent({
     const step2 = () => h('div', { class: 'space-y-4' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Contexto Curricular'),
       h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl' }, [
-        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Asignatura'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.subject = e.target.value; data.oaIds = []; oas.value = []; if (data.level) loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...activeSubjects().map(s => h('option', { value: s.key }, `${s.icon || ''} ${s.name}`))])]),
-        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level = e.target.value; data.oaIds = []; oas.value = []; loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Asignatura'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.subject = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); if (data.level) loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...activeSubjects().map(s => h('option', { value: s.key }, `${s.icon || ''} ${s.name}`))])]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
       ]),
+      availableAxes().length > 0 ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Eje / Unidad'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 max-w-xl', onChange: (e) => { axisFilter.value = e.target.value; if (axisFilter.value) { const inFilter = oas.value.filter(oa => (oa.axis || '').trim() === axisFilter.value); const keep = data.oaIds.filter(id => inFilter.some(oa => oa.id === id)); data.oaIds.splice(0, data.oaIds.length, ...keep); } } }, [h('option', { value: '' }, 'Todos los ejes'), ...availableAxes().map(a => h('option', { value: a }, a))])]) : null,
       error.value ? h('div', { class: 'text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded' }, error.value) : null,
       data.oaIds.length > 0 ? h('p', { class: 'text-xs text-green-600' }, `✓ ${data.oaIds.length} OA seleccionado(s)`) : null,
       oasLoading.value ? h('p', { class: 'text-xs text-amber-600' }, 'Cargando OA...') : null,
       oasLoaded.value && oas.value.length === 0 ? h('p', { class: 'text-xs text-amber-600' }, 'No hay OA para esta asignatura y nivel. Intenta otra combinación.') : null,
-      h('div', { class: 'max-h-60 overflow-y-auto space-y-1 border rounded-lg p-2' }, oas.value.map(oa =>
+      h('div', { class: 'max-h-60 overflow-y-auto space-y-1 border rounded-lg p-2' }, filteredOAs().map(oa =>
         h('label', { class: 'flex items-start gap-2 p-2 rounded hover:bg-slate-50 cursor-pointer text-sm' }, [
           h('input', { type: 'checkbox', checked: data.oaIds.includes(oa.id), onChange: () => toggleOA(oa.id), class: 'mt-0.5' }),
-          h('div', [h('span', { class: 'font-mono text-xs text-blue-600' }, oa.code), h('p', { class: 'text-xs text-slate-600' }, oa.text.slice(0, 120) + '...')]),
+          h('div', [h('span', { class: 'font-mono text-xs text-blue-600' }, oa.code), (oa.axis ? h('span', { class: 'ml-2 text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded' }, oa.axis) : null), h('p', { class: 'text-xs text-slate-600' }, oa.text.slice(0, 120) + '...')]),
         ])
       )),
       h('button', { onClick: () => step.value = 3, disabled: !data.level || data.oaIds.length === 0, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50 hover:bg-blue-700 transition' }, 'Siguiente →'),
