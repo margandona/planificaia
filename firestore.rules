@@ -15,24 +15,77 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.token.admin == true;
     }
 
+    function isMember(orgId) {
+      return isAuthenticated()
+        && orgId != null
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function memberRole(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isOrgAdmin(orgId) {
+      return isMember(orgId) && (memberRole(orgId) == 'owner' || memberRole(orgId) == 'coordinator');
+    }
+
+    function isOrgOwner(orgId) {
+      return isMember(orgId) && memberRole(orgId) == 'owner';
+    }
+
+    function canReadPlanning(planning) {
+      return isOwner(planning.userId)
+        || isAdmin()
+        || (planning.orgId != null && isMember(planning.orgId));
+    }
+
     // ========== Users: solo propio perfil ==========
     match /users/{userId} {
       allow read, write: if isOwner(userId);
       allow create: if isAuthenticated();
     }
 
-    // ========== Plannings: propietario o admin ==========
+    // ========== Organizations ==========
+    match /organizations/{orgId} {
+      allow read: if isMember(orgId);
+      allow create: if isAuthenticated();
+      allow update: if isOrgAdmin(orgId);
+      allow delete: if isOrgOwner(orgId);
+
+      // Members: cualquier miembro lee, solo admin escribe
+      match /members/{uid} {
+        allow read: if isMember(orgId);
+        allow write: if isOrgAdmin(orgId);
+      }
+
+      // Invitations: solo admin de la org lee/escribe
+      match /invitations/{inviteId} {
+        allow read: if isOrgAdmin(orgId);
+        allow write: if false; // solo desde Cloud Functions
+      }
+    }
+
+    // ========== Plannings: propietario, admin, o miembro de la org ==========
     match /plannings/{planningId} {
-      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow read: if canReadPlanning(resource.data);
       allow create: if isAuthenticated()
         && request.resource.data.userId == request.auth.uid;
-      allow update: if isOwner(resource.data.userId) || isAdmin();
-      allow delete: if isOwner(resource.data.userId) || isAdmin();
+      allow update: if isOwner(resource.data.userId) || isAdmin() || isOrgAdmin(resource.data.orgId);
+      allow delete: if isOwner(resource.data.userId) || isAdmin() || isOrgAdmin(resource.data.orgId);
 
       // Subcolección de versiones
       match /versions/{versionId} {
-        allow read: if isOwner(resource.data.userId) || isAdmin();
-        allow write: if isOwner(resource.data.userId) || isAdmin();
+        allow read: if canReadPlanning(get(/databases/$(database)/documents/plannings/$(planningId)).data);
+        allow write: if isOwner(get(/databases/$(database)/documents/plannings/$(planningId)).data.userId) || isAdmin();
+      }
+
+      // Comentarios: leen quienes pueden leer la planificación, escriben miembros de la org
+      match /comments/{commentId} {
+        allow read: if canReadPlanning(get(/databases/$(database)/documents/plannings/$(planningId)).data);
+        allow create: if canReadPlanning(get(/databases/$(database)/documents/plannings/$(planningId)).data)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.planningId == planningId;
+        allow update, delete: if isOwner(resource.data.userId) || isAdmin();
       }
     }
 

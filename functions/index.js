@@ -1059,6 +1059,11 @@ export const generatePlanning = onCall(
 
     // 9. Construir y guardar planificación
     const planning = buildPlanningRecord(userId, sanitizedContext, oaDocs, normalizedContent, aiResult, templateDoc.id);
+    planning.userName = request.auth.token.name || request.auth.token.email || '';
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists && userDoc.data().orgId) {
+      planning.orgId = userDoc.data().orgId;
+    }
     const docRef = await db.collection('plannings').add(planning);
 
     // 10. Registrar costo
@@ -1207,11 +1212,14 @@ export const approvePlanning = onCall(
     if (!planningDoc.exists) throw new Error('PLANIFICACION_NO_ENCONTRADA');
 
     const planning = planningDoc.data();
-    if (planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+    const memberRole = await getMemberRole(planning.orgId, userId);
+    if (!canApprovePlanning(userId, planning, memberRole)) throw new Error('ACCESO_NO_AUTORIZADO');
+    const isOwner = planning.userId === userId;
 
     await planningRef.update({
       status: 'approved',
       approvedAt: new Date().toISOString(),
+      approvedBy: isOwner ? userId : 'utp:' + userId,
       updatedAt: new Date().toISOString(),
     });
 
@@ -1220,6 +1228,7 @@ export const approvePlanning = onCall(
       action: 'approve',
       resource: 'planning',
       resourceId: planningId,
+      role: isOwner ? 'owner' : 'coordinator',
       createdAt: new Date().toISOString(),
     });
 
@@ -1255,6 +1264,209 @@ export const submitFeedback = onCall(
       ease: toScore(ease),
       comments: sanitizeInput(comments || '').slice(0, 2000),
       createdAt: new Date().toISOString(),
+    });
+
+    return { success: true };
+  }
+);
+
+// ─── S-3: ORGANIZACIONES Y ROLES ─────────────────────────
+
+const VALID_ROLES = ['teacher', 'coordinator', 'admin'];
+
+function canApprovePlanning(userId, planning, memberRole) {
+  if (!planning) return false;
+  if (planning.userId === userId) return true;
+  if (!planning.orgId) return false;
+  return ['owner', 'coordinator'].includes(memberRole);
+}
+
+function sanitizeOrgName(name) {
+  return String(name || '').trim().slice(0, 120);
+}
+
+async function getOrgDoc(orgId) {
+  const snap = await db.collection('organizations').doc(orgId).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+
+async function getOrgMember(orgId, uid) {
+  if (!orgId) return null;
+  const snap = await db.collection('organizations').doc(orgId).collection('members').doc(uid).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+
+async function requireOrgAdmin(orgId, uid) {
+  const member = await getOrgMember(orgId, uid);
+  if (!member || !['owner', 'coordinator'].includes(member.role)) {
+    throw new Error('ACCESO_NO_AUTORIZADO');
+  }
+  return member;
+}
+
+async function getMemberRole(orgId, uid) {
+  const m = await getOrgMember(orgId, uid);
+  return m ? m.role : null;
+}
+
+function generateInviteToken() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+export const setUserRole = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const { targetUid, role } = request.data || {};
+    if (!targetUid || !VALID_ROLES.includes(role)) throw new Error('DATOS_INVALIDOS');
+    if (request.auth.token.admin !== true) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    await auth.setCustomUserClaims(targetUid, { role });
+    await db.collection('users').doc(targetUid).set({ role, updatedAt: new Date().toISOString() }, { merge: true });
+    await db.collection('audit-logs').add({
+      userId: request.auth.uid, action: 'set-role', resource: 'user', resourceId: targetUid, role, createdAt: new Date().toISOString(),
+    });
+    return { success: true, role };
+  }
+);
+
+export const createOrganization = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const name = sanitizeOrgName(request.data?.name);
+    if (!name) throw new Error('DATOS_INVALIDOS');
+    const userId = request.auth.uid;
+
+    // Un usuario solo puede tener una organización como owner.
+    const existingOwner = await db.collection('organizations').where('ownerUid', '==', userId).limit(1).get();
+    if (!existingOwner.empty) throw new Error('YA_TIENES_ORGANIZACION');
+
+    const orgRef = db.collection('organizations').doc();
+    const now = new Date().toISOString();
+    await orgRef.set({
+      name,
+      ownerUid: userId,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await orgRef.collection('members').doc(userId).set({
+      uid: userId,
+      displayName: request.auth.token.name || request.auth.token.email || '',
+      email: request.auth.token.email || '',
+      role: 'owner',
+      joinedAt: now,
+    });
+    await db.collection('users').doc(userId).set({ orgId: orgRef.id, role: 'coordinator', updatedAt: now }, { merge: true });
+
+    await db.collection('audit-logs').add({
+      userId, action: 'create-org', resource: 'organization', resourceId: orgRef.id, createdAt: now,
+    });
+
+    return { success: true, orgId: orgRef.id, name };
+  }
+);
+
+export const inviteMember = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const { orgId, email, role } = request.data || {};
+    const userId = request.auth.uid;
+    if (!orgId || !email || !['teacher', 'coordinator'].includes(role)) throw new Error('DATOS_INVALIDOS');
+
+    await requireOrgAdmin(orgId, userId);
+    const org = await getOrgDoc(orgId);
+    if (!org) throw new Error('ORGANIZACION_NO_ENCONTRADA');
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    // No invitar a alguien que ya es miembro
+    const memberSnap = await db.collection('organizations').doc(orgId).collection('members').where('email', '==', cleanEmail).limit(1).get();
+    if (!memberSnap.empty) throw new Error('YA_ES_MIEMBRO');
+
+    const token = generateInviteToken();
+    const inviteRef = await db.collection('organizations').doc(orgId).collection('invitations').add({
+      email: cleanEmail,
+      role,
+      token,
+      status: 'pending',
+      invitedBy: userId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await db.collection('audit-logs').add({
+      userId, action: 'invite', resource: 'organization', resourceId: orgId, email: cleanEmail, role, createdAt: new Date().toISOString(),
+    });
+
+    return { success: true, inviteId: inviteRef.id, token, link: `https://planificacion-con-ia.web.app/#/unirme/${orgId}/${token}` };
+  }
+);
+
+export const acceptInvite = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const { orgId, token } = request.data || {};
+    const userId = request.auth.uid;
+    const userEmail = String(request.auth.token.email || '').toLowerCase();
+    if (!orgId || !token) throw new Error('DATOS_INVALIDOS');
+
+    const org = await getOrgDoc(orgId);
+    if (!org) throw new Error('ORGANIZACION_NO_ENCONTRADA');
+
+    const inviteSnap = await db.collection('organizations').doc(orgId).collection('invitations')
+      .where('token', '==', token).where('status', '==', 'pending').limit(1).get();
+    if (inviteSnap.empty) throw new Error('INVITACION_INVALIDA');
+
+    const invite = inviteSnap.docs[0].data();
+    if (String(invite.email || '').toLowerCase() !== userEmail) throw new Error('EMAIL_NO_COINCIDE');
+    if (new Date(invite.expiresAt) < new Date()) throw new Error('INVITACION_EXPIRADA');
+
+    const existingMember = await db.collection('organizations').doc(orgId).collection('members').doc(userId).get();
+    if (!existingMember.exists) {
+      await db.collection('organizations').doc(orgId).collection('members').doc(userId).set({
+        uid: userId,
+        displayName: request.auth.token.name || userEmail,
+        email: userEmail,
+        role: invite.role,
+        joinedAt: new Date().toISOString(),
+      });
+    }
+    await inviteSnap.docs[0].ref.update({ status: 'accepted', acceptedAt: new Date().toISOString(), acceptedBy: userId });
+    await db.collection('users').doc(userId).set({ orgId, updatedAt: new Date().toISOString() }, { merge: true });
+
+    await db.collection('audit-logs').add({
+      userId, action: 'accept-invite', resource: 'organization', resourceId: orgId, role: invite.role, createdAt: new Date().toISOString(),
+    });
+
+    return { success: true, orgId, role: invite.role };
+  }
+);
+
+export const removeMember = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const { orgId, targetUid } = request.data || {};
+    const userId = request.auth.uid;
+    if (!orgId || !targetUid) throw new Error('DATOS_INVALIDOS');
+    if (targetUid === userId) throw new Error('NO_PUEDES_REMOVERTE');
+
+    await requireOrgAdmin(orgId, userId);
+    const targetMember = await getOrgMember(orgId, targetUid);
+    if (!targetMember) throw new Error('MIEMBRO_NO_ENCONTRADO');
+    if (targetMember.role === 'owner') throw new Error('NO_PUEDES_REMOVER_OWNER');
+
+    await db.collection('organizations').doc(orgId).collection('members').doc(targetUid).delete();
+    const userDoc = await db.collection('users').doc(targetUid).get();
+    if (userDoc.exists && userDoc.data().orgId === orgId) {
+      await db.collection('users').doc(targetUid).update({ orgId: null, updatedAt: new Date().toISOString() });
+    }
+
+    await db.collection('audit-logs').add({
+      userId, action: 'remove-member', resource: 'organization', resourceId: orgId, targetUid, createdAt: new Date().toISOString(),
     });
 
     return { success: true };

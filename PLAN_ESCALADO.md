@@ -27,7 +27,7 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | S-0 | Consolidación y habilitadores | Alta | ✅ COMPLETADA | 2 sem |
 | S-1 | Cobertura curricular completa | Alta | ✅ COMPLETADA | 4 sem |
 | S-2 | Tipos de planificación extendidos | Alta | ✅ COMPLETADA | 4 sem |
-| S-3 | Colaboración e institucional | Media | ⏳ PENDIENTE | 6 sem |
+| S-3 | Colaboración e institucional | Media | ✅ COMPLETADA | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ⏳ PENDIENTE | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ⏳ PENDIENTE | 3 sem |
 | S-6 | Cumplimiento legal y accesibilidad | Alta | ⏳ PENDIENTE | 3 sem |
@@ -117,6 +117,19 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | Biblioteca compartida | Repositorio de planificaciones reutilizables por nivel/asignatura | 1 sem |
 
 **Criterio de salida:** un UTP puede ver y aprobar las planificaciones de su equipo.
+
+#### ✅ Cierre S-3 (2026-07-31)
+
+- **Roles (custom claims):** `setUserRole` (admin-only) asigna `role`: `teacher | coordinator | admin`; el frontend lee `getIdTokenResult` y expone `store.role`.
+- **Organizaciones:** colección `organizations/{orgId}` con `ownerUid`/`name`; miembros en `organizations/{orgId}/members/{uid}` (roles `owner | coordinator | teacher`). `createOrganization` (backend) crea el owner, fija `role: coordinator` y `orgId` en `users/{uid}`. `removeMember` no permite removerse a sí mismo ni al owner.
+- **Invitaciones:** `organizations/{orgId}/invitations/{inviteId}` con token único, vencimiento 7 días y email destino. Flujo: `inviteMember` → link `https://planificacion-con-ia.web.app/#/unirme/:orgId/:token` → `acceptInvite` valida email y vencimiento. Índice `invitations(token ASC, status ASC)`.
+- **Aprobación UTP:** `approvePlanning` usa la función pura `canApprovePlanning(userId, planning, memberRole)`: owner o (planning con `orgId` + rol `owner`/`coordinator`). Registra `approvedBy: 'utp:'+uid` y audit-log con `role`. UI en detalle ("✓ Aprobar (UTP)") y en el panel institucional.
+- **Comentarios:** subcolección `plannings/{id}/comments` (userId, text, createdAt, planningId). Reglas: leer si `canReadPlanning`, crear solo del propio auth uid.
+- **Panel institucional (`#/institucional`):** crear colegio si no existe, invitar docentes/UTP (con copia del enlace), listar miembros (quitar para admin), invitaciones pendientes y cola de planificaciones del equipo con aprobación UTP.
+- **Biblioteca compartida:** en el dashboard, miembro de una org ve planificaciones del equipo (`orgId` + `userId !=` + `createdAt`); `generatePlanning` y el editor manual registran `orgId` y `userName`.
+- **Índices nuevos:** `plannings(orgId, createdAt desc)`, `plannings(orgId, status, createdAt desc)`, `plannings(orgId, userId, createdAt desc)`.
+- **Tests:** helpers S-3 duplicados en `functions/index.test.js` (patrón del repo) + 8 casos nuevos; `pnpm --dir functions test:unit` → 56/56 PASS. `node --check` OK en `index.js`, `index.test.js` y `app.js`.
+- **Criterio de salida cumplido:** un UTP (rol `coordinator` con membresía `owner`/`coordinator`) puede ver (biblioteca compartida) y aprobar (panel institucional + detalle) las planificaciones del equipo.
 
 ---
 

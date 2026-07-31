@@ -184,6 +184,21 @@ function buildPlanningRecord(userId, context, oaDocs, content, aiResult, promptT
   return planning;
 }
 
+// ─── S-3: Organizations & roles (duplicado de index.js) ───
+
+const VALID_ROLES = ['teacher', 'coordinator', 'admin'];
+
+function canApprovePlanning(userId, planning, memberRole) {
+  if (!planning) return false;
+  if (planning.userId === userId) return true;
+  if (!planning.orgId) return false;
+  return ['owner', 'coordinator'].includes(memberRole);
+}
+
+function sanitizeOrgName(name) {
+  return String(name || '').trim().slice(0, 120);
+}
+
 function buildTypeInstruction(type, context, oaDocs) {
   const oaCodes = oaDocs.map(oa => oa.code).join(', ');
   if (type === 'unit') {
@@ -656,5 +671,46 @@ describe('Validation Rules Definitions', () => {
   test('V-006 no aplica a evaluacion', () => {
     const rule = VALIDATION_RULES.find(r => r.id === 'V-006');
     expect(rule.check({ type: 'evaluation', evaluation: {} })).toBe(true);
+  });
+});
+
+describe('S-3 Organizations & Roles', () => {
+  test('VALID_ROLES contiene teacher, coordinator y admin', () => {
+    expect(VALID_ROLES).toEqual(expect.arrayContaining(['teacher', 'coordinator', 'admin']));
+    expect(VALID_ROLES).toHaveLength(3);
+  });
+
+  test('canApprovePlanning: el owner aprueba su planificacion', () => {
+    expect(canApprovePlanning('u1', { userId: 'u1', orgId: 'org1' }, null)).toBe(true);
+  });
+
+  test('canApprovePlanning: coordinator de la org aprueba planificaciones del equipo', () => {
+    expect(canApprovePlanning('u2', { userId: 'u1', orgId: 'org1' }, 'coordinator')).toBe(true);
+    expect(canApprovePlanning('u2', { userId: 'u1', orgId: 'org1' }, 'owner')).toBe(true);
+  });
+
+  test('canApprovePlanning: miembro teacher no puede aprobar', () => {
+    expect(canApprovePlanning('u2', { userId: 'u1', orgId: 'org1' }, 'teacher')).toBe(false);
+  });
+
+  test('canApprovePlanning: sin membresia en la org no puede aprobar', () => {
+    expect(canApprovePlanning('u2', { userId: 'u1', orgId: 'org1' }, null)).toBe(false);
+  });
+
+  test('canApprovePlanning: planificacion sin orgId solo la aprueba el owner', () => {
+    expect(canApprovePlanning('u1', { userId: 'u1' }, 'coordinator')).toBe(true);
+    expect(canApprovePlanning('u2', { userId: 'u1' }, 'coordinator')).toBe(false);
+  });
+
+  test('canApprovePlanning: null planning no se puede aprobar', () => {
+    expect(canApprovePlanning('u1', null, 'owner')).toBe(false);
+  });
+
+  test('sanitizeOrgName limpia espacios y limita a 120 caracteres', () => {
+    expect(sanitizeOrgName('  Colegio San Juan  ')).toBe('Colegio San Juan');
+    expect(sanitizeOrgName('   ')).toBe('');
+    expect(sanitizeOrgName(null)).toBe('');
+    const long = 'a'.repeat(200);
+    expect(sanitizeOrgName(long)).toHaveLength(120);
   });
 });
