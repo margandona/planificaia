@@ -1,7 +1,7 @@
 # PLAN DE ESCALADO — PlanificaIA v2.5 → v3.0
 
 **Documento independiente de escalamiento del MVP**
-Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8 niveles), DUA, catálogo dinámico, feedback + métricas, stack Node 22.
+Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA + 327 habilidades + 598 actitudes + 62 OAT)** en 19 asignaturas y todos los niveles (parvularia → 4° medio + EPJA), DUA, catálogo dinámico, feedback + métricas, 6 tipos de planificación, stack Node 22.
 
 ---
 
@@ -13,7 +13,7 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 |---|---|---|
 | Asignaturas | 5 | 12+ (todo el currículum) |
 | Niveles | 5° básico – 4° medio | Parvularia + Básica + Media + EPJA |
-| Tipo de planificación | Clase individual | Clase, unidad, mensual, anual, evaluación |
+| Tipo de planificación | Clase individual | Clase, unidad, mensual, anual, evaluación, multigrado |
 | Usuarios | Docente individual | Docente + UTP + equipo directivo + institución |
 | Modelo de negocio | Gratuito | Freemium / institucional |
 | Cobertura | Chile | Chile (base) → LATAM (post-v3.0) |
@@ -26,7 +26,7 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 |------|--------|-----------|--------|----------|
 | S-0 | Consolidación y habilitadores | Alta | ✅ COMPLETADA | 2 sem |
 | S-1 | Cobertura curricular completa | Alta | ✅ COMPLETADA | 4 sem |
-| S-2 | Tipos de planificación extendidos | Alta | 🔨 EN CURSO | 4 sem |
+| S-2 | Tipos de planificación extendidos | Alta | ✅ COMPLETADA | 4 sem |
 | S-3 | Colaboración e institucional | Media | ⏳ PENDIENTE | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ⏳ PENDIENTE | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ⏳ PENDIENTE | 3 sem |
@@ -77,7 +77,7 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 
 ---
 
-### Fase S-2 — Tipos de planificación extendidos
+### Fase S-2 — Tipos de planificación extendidos ✅ COMPLETADA
 
 **Objetivo:** pasar de "clase" a planificaciones de mayor alcance.
 
@@ -99,6 +99,8 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 - **Editor manual**: selector de tipo, nivel 2 multigrado, editor de estructura por unidad (clases/semanas/meses con actividades, OA y evaluación por ítem) y editor de evaluación (indicadores, rúbrica, instrumentos, Decreto 67).
 - **Detalle/dashboard**: badges de tipo y niveles multigrado; render de unidades (clases/semanas/meses), evaluación y actividades por tipo.
 - **Tests**: 48/48 unitarios (validación por tipo, instrucciones de tipo, V-006 por tipo, records multigrado/evaluación/unidad); seed de templates idempotente (`scripts/seed-prompt-templates.mjs`).
+
+**Cierre S-2 (2026-07-31):** commit `eb682be` pusheado a `main`, **CI y Deploy success** (producción verificada: app.js con selector de tipos, unitData y evaluationType). Criterios de salida cumplidos: wizard con selector de tipo de planificación (6 tipos) y editor que soporta estructura por unidad (clases/semanas/meses + evaluación standalone con rúbricas e indicadores, Decreto 67).
 
 ---
 
@@ -220,7 +222,7 @@ S-0 Consolidación
 | OA disponibles | >1,500 |
 | Asignaturas cubiertas | 12+ |
 | Niveles educativos | 12 (parvularia→4° medio) + EPJA |
-| Tipos de planificación | 5 (clase, unidad, mensual, anual, evaluación) |
+| Tipos de planificación | 6 (clase, unidad, mensual, anual, evaluación, multigrado) |
 | Usuarios activos | >500 docentes |
 | Tasa de aprobación | >70% |
 | Tiempo promedio de generación | <20s |
