@@ -50,4 +50,4 @@ jobs:
 
       - name: Deploy to Firebase
         run: |
-          npx firebase-tools deploy --only hosting,functions,firestore --project planificacion-con-ia --force
+          npx firebase-tools deploy --only hosting,functions --project planificacion-con-ia --force
