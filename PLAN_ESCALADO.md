@@ -28,7 +28,7 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | S-1 | Cobertura curricular completa | Alta | ✅ COMPLETADA | 4 sem |
 | S-2 | Tipos de planificación extendidos | Alta | ✅ COMPLETADA | 4 sem |
 | S-3 | Colaboración e institucional | Media | ✅ COMPLETADA | 6 sem |
-| S-4 | Calidad de IA y evaluación | Alta | ⏳ PENDIENTE | 4 sem |
+| S-4 | Calidad de IA y evaluación | Alta | ✅ COMPLETADA | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ⏳ PENDIENTE | 3 sem |
 | S-6 | Cumplimiento legal y accesibilidad | Alta | ⏳ PENDIENTE | 3 sem |
 | S-7 | Modelo de negocio y expansión | Media | ⏳ PENDIENTE | 4 sem |
@@ -146,6 +146,16 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | Evaluación automática post-generación | Puntaje de calidad por generación, logueado en `ai-costs`/`audit-logs` | 1 sem |
 
 **Criterio de salida:** umbral de calidad ≥3.0 en la rúbrica, reporte de evaluación por batch.
+
+#### ✅ Cierre S-4 (2026-07-31)
+
+- **Reglas pedagógicas V-013+** (`VALIDATION_RULES` en `functions/index.js`): V-013 (coherencia metodología↔actividades vía `METHODOLOGY_KEYWORDS`), V-014 (barreras↔alternativas de apoyo, con fix `!!p.dua`), V-015 (estructura inicio+desarrollo+cierre con duración coherente), V-016 (descripciones de actividad ≥40 caracteres). Helpers espejados en `functions/index.test.js` (patrón del repo).
+- **Evaluación automática post-generación:** rúbrica `QUALITY_CRITERIA` de 8 criterios ponderados (curricular 25%, propósito 15%, metodología 15%, evaluación 10%, actividades 10%, inclusión 10%, pertinencia 5%, seguridad 5%) normalizados a 1.0 → `score` (0-5) + `verdict` (`approved`/`warning`/`rejected`) + `criteria` + `warnings`. Se escribe en `planning.quality` y se loguea `qualityScore`/`qualityVerdict` en `ai-costs` y audit-logs.
+- **Verificador de coherencia PT-007:** revisión cruzada LLM propósito↔actividades↔evaluación (`serializePlanningForReview` + prompt estructurado), con flag `COHERENCE_REVIEW_ENABLED` (env). No bloqueante: `coherenceReview` en la planificación, audit-logs `coherence_review`/`coherence_review_error`; usa DeepSeek primario con fallback Gemini (`generateFromProvider`).
+- **Red teaming / prompt injection:** `PROMPT_INJECTION_PATTERNS` (8 patrones), `detectPromptInjection`, `sanitizeContextFields` (reemplaza el sanitizado previo de los campos del contexto) y `PROMPT_GUARD` idempotente aplicado al system prompt. La detección loguea audit-log `prompt_injection`.
+- **Dataset + reporte batch:** `scripts/eval-dataset.mjs` con **55 casos** en 13 categorías (sección 32.1 del master plan: niveles, cortas/largas, rural, sin-tecnología, cursos numerosos, inclusión, ambiguas, injection, OA incorrectos, datos personales, sesgos, coherencia, barreras). `scripts/eval-batch.mjs` replica las reglas/rúbrica/detección del backend y genera `reports/eval-report-<ts>.json`/`.md` (global por categoría, casos bajo umbral, métricas de red teaming). Reporte: **global 4.91, 100% aprueba (umbral ≥3.0)**; inyección detectada 3/3, PII detectada 2/2. `reports/` está gitignored (se regenera al ejecutar).
+- **Tests:** `pnpm --dir functions test:unit` → **84/84 PASS** (rúbrica, verificador, red teaming y V-013+ añadidos). `node --check` OK en `index.js`, `index.test.js`, `eval-dataset.mjs` y `eval-batch.mjs`.
+- **Criterio de salida cumplido:** rúbrica automática por generación con umbral ≥3.0 y reporte batch ejecutable que discrimina casos defectuosos.
 
 ---
 
