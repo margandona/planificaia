@@ -409,9 +409,10 @@ const DashboardPage = defineComponent({
                 h('div', [
                   h('div', { class: 'flex items-center gap-2' }, [
                     h('h3', { class: 'font-medium text-slate-900' }, p.title || 'Sin título'),
+                    h('span', { class: 'text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full' }, ({ class: 'Clase', unit: 'Unidad', monthly: 'Mensual', annual: 'Anual', evaluation: 'Evaluación', multigrade: 'Multigrado' })[p.type] || 'Clase'),
                     p.warnings?.length > 0 ? h('span', { class: `text-xs px-1.5 py-0.5 rounded-full ${p.warnings.some(w => w.type === 'critical') ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}` }, `${p.warnings.length} adv`) : null,
                   ]),
-                  h('p', { class: 'text-xs text-slate-400' }, `${p.level || ''} · ${p.duration || ''} min · ${new Date(p.createdAt).toLocaleDateString('es-CL')}`),
+                  h('p', { class: 'text-xs text-slate-400' }, `${p.levels?.length ? p.levels.map(l => levelLabel(l)).join(' + ') : (p.level || '')} · ${p.type === 'annual' ? 'año lectivo' : (p.duration + ' min')} · ${new Date(p.createdAt).toLocaleDateString('es-CL')}`),
                 ]),
                 statusBadge(p.status),
               ]),
@@ -487,17 +488,18 @@ const WizardPage = defineComponent({
   setup() {
     if (!guard()) return () => null;
     const step = ref(1);
-    const data = reactive({ title: '', level: '', subject: '', oaIds: [], duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
+    const data = reactive({ type: 'class', title: '', level: '', level2: '', subject: '', oaIds: [], numClasses: 6, evaluationType: 'formativa', instrument: 'prueba', duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
     const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
     const axisFilter = ref('');
     onMounted(() => { loadSubjectCatalog(); });
 
     const loadOAs = async () => {
-      if (!data.level) return;
+      const levelsToLoad = data.type === 'multigrade' ? [data.level, data.level2].filter(Boolean) : [data.level];
+      if (levelsToLoad.length === 0) return;
       error.value = '';
       oasLoading.value = true;
       oasLoaded.value = false;
-      const cacheKey = `curriculum_v2_${data.level}_${data.subject}`;
+      const cacheKey = `curriculum_v2_${levelsToLoad.join('+')}_${data.subject}`;
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         try {
@@ -511,10 +513,14 @@ const WizardPage = defineComponent({
         } catch (e) { /* cache corrupto, recargar */ }
       }
       try {
-        const q = query(collection(db, 'curriculum'), where('level', '==', data.level), where('subject', '==', data.subject), orderBy('code'));
-        const docs = (await getDocs(q)).docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(d => d.isActive !== false && d.type === undefined);
+        const docs = [];
+        for (const lv of levelsToLoad) {
+          const q = query(collection(db, 'curriculum'), where('level', '==', lv), where('subject', '==', data.subject), orderBy('code'));
+          const levelDocs = (await getDocs(q)).docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(d => d.isActive !== false && d.type === undefined);
+          docs.push(...levelDocs);
+        }
         oas.value = docs;
         oasLoaded.value = true;
         try {
@@ -527,7 +533,11 @@ const WizardPage = defineComponent({
         oasLoading.value = false;
       }
     };
-    const toggleOA = (id) => { const i = data.oaIds.indexOf(id); if (i >= 0) data.oaIds.splice(i, 1); else if (data.oaIds.length < 4) data.oaIds.push(id); };
+    const toggleOA = (id) => {
+      const i = data.oaIds.indexOf(id);
+      if (i >= 0) data.oaIds.splice(i, 1);
+      else if (data.oaIds.length < ({ class: 4, unit: 8, monthly: 10, annual: 12, evaluation: 4, multigrade: 6 })[data.type] || 4) data.oaIds.push(id);
+    };
 
     const availableAxes = () => {
       const seen = [];
@@ -542,9 +552,29 @@ const WizardPage = defineComponent({
 
     const generate = async () => {
       generating.value = true; error.value = '';
+      const typeLabels = { class: 'Clase', unit: 'Unidad didáctica', monthly: 'Mensual', annual: 'Anual', evaluation: 'Evaluación', multigrade: 'Multigrado' };
       try {
         const res = await generatePlanningFn({
-          context: { title: data.title, level: data.level, subject: data.subject, duration: parseInt(data.duration), modality: data.modality, studentCount: data.studentCount, priorKnowledge: data.priorKnowledge, resources: data.resources ? data.resources.split(',').map(r => r.trim()) : [], methodology: data.methodology, barriers: data.barriers, framework: data.framework, dua: data.framework === 'dua' ? data.dua : null },
+          context: {
+            type: data.type,
+            title: data.title,
+            level: data.level,
+            level2: data.level2,
+            levels: data.type === 'multigrade' ? [data.level, data.level2] : null,
+            subject: data.subject,
+            numClasses: data.type === 'class' ? undefined : data.numClasses,
+            evaluationType: data.type === 'evaluation' ? data.evaluationType : undefined,
+            instrument: data.type === 'evaluation' ? data.instrument : undefined,
+            duration: parseInt(data.duration),
+            modality: data.modality,
+            studentCount: data.studentCount,
+            priorKnowledge: data.priorKnowledge,
+            resources: data.resources ? data.resources.split(',').map(r => r.trim()) : [],
+            methodology: data.methodology,
+            barriers: data.barriers,
+            framework: data.framework,
+            dua: data.framework === 'dua' ? data.dua : null,
+          },
           oaIds: data.oaIds,
         });
         planning.value = res.data;
@@ -569,23 +599,24 @@ const WizardPage = defineComponent({
     // Steps
     const step1 = () => h('div', { class: 'space-y-4' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Tipo de planificación'),
-      h('p', { class: 'text-sm text-slate-500' }, '¿Cómo deseas crear tu planificación?'),
-      h('div', { class: 'grid grid-cols-2 gap-3 max-w-lg' },
+      h('p', { class: 'text-sm text-slate-500' }, '¿Qué quieres generar?'),
+      h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl' },
         [
-          ['Clase con IA', 'clase-ia', 'Genera una planificación asistida por inteligencia artificial basada en OA y contexto', '🤖'],
-          ['Clase manual', 'clase-manual', 'Crea una planificación desde cero con el editor estructurado', '✏️'],
-        ].map(([tit, val, desc, icon]) =>
+          ['class', '🤖', 'Clase con IA', 'Una clase completa generada por IA (inicio, desarrollo, cierre, evaluación)', 'Recomendado'],
+          ['unit', '📚', 'Unidad didáctica', '4 a 8 clases con secuencia didáctica progresiva y evaluación de unidad', null],
+          ['monthly', '🗓️', 'Planificación mensual', '4 semanas con distribución de OA y evaluación del mes', null],
+          ['annual', '📅', 'Planificación anual', 'Distribución de OA y unidades a lo largo del año escolar', null],
+          ['evaluation', '📊', 'Evaluación', 'Instrumentos, rúbricas e indicadores alineados al Decreto 67', null],
+          ['multigrade', '👥', 'Multigrado', 'Una clase que combina dos niveles con actividades diferenciadas', null],
+        ].map(([val, icon, tit, desc, tag]) =>
           h('button', {
-            class: `p-4 rounded-xl border-2 text-left transition ${data.title === val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`,
-            onClick: () => {
-              data.title = val;
-              if (val === 'clase-manual') { go('/nueva-manual'); }
-              else step.value = 2;
-            }
+            class: `p-4 rounded-xl border-2 text-left transition ${data.type === val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`,
+            onClick: () => { data.type = val; step.value = 2; }
           }, [
             h('span', { class: 'text-2xl' }, icon),
             h('p', { class: 'font-medium mt-1' }, tit),
             h('p', { class: 'text-xs text-slate-400 mt-0.5' }, desc),
+            tag ? h('span', { class: 'mt-2 inline-block text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full' }, tag) : null,
           ])
         )),
     ]);
@@ -594,7 +625,14 @@ const WizardPage = defineComponent({
       h('h2', { class: 'text-lg font-semibold' }, 'Contexto Curricular'),
       h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl' }, [
         h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Asignatura'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.subject = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); if (data.level) loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...activeSubjects().map(s => h('option', { value: s.key }, `${s.icon || ''} ${s.name}`))])]),
-        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
+        data.type === 'multigrade'
+          ? h('div', { class: 'space-y-3 max-w-xl' }, [
+              h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-3' }, [
+                h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel 1'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); if (data.level2) loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
+                h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel 2'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level2 = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); if (data.level) loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
+              ]),
+            ])
+          : h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => { data.level = e.target.value; data.oaIds = []; oas.value = []; resetAxisFilter(); loadOAs(); } }, [h('option', { value: '' }, 'Selecciona...'), ...LEVELS.map(([v, l]) => h('option', { value: v }, l))])]),
       ]),
       availableAxes().length > 0 ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Eje / Unidad'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 max-w-xl', onChange: (e) => { axisFilter.value = e.target.value; if (axisFilter.value) { const inFilter = oas.value.filter(oa => (oa.axis || '').trim() === axisFilter.value); const keep = data.oaIds.filter(id => inFilter.some(oa => oa.id === id)); data.oaIds.splice(0, data.oaIds.length, ...keep); } } }, [h('option', { value: '' }, 'Todos los ejes'), ...availableAxes().map(a => h('option', { value: a }, a))])]) : null,
       error.value ? h('div', { class: 'text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded' }, error.value) : null,
@@ -607,14 +645,21 @@ const WizardPage = defineComponent({
           h('div', [h('span', { class: 'font-mono text-xs text-blue-600' }, oa.code), (oa.axis ? h('span', { class: 'ml-2 text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded' }, oa.axis) : null), h('p', { class: 'text-xs text-slate-600' }, oa.text.slice(0, 120) + '...')]),
         ])
       )),
-      h('button', { onClick: () => step.value = 3, disabled: !data.level || data.oaIds.length === 0, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50 hover:bg-blue-700 transition' }, 'Siguiente →'),
+      h('button', { onClick: () => step.value = 3, disabled: !data.level || (data.type === 'multigrade' && !data.level2) || data.oaIds.length === 0, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50 hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
     const step3 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Contexto Pedagógico'),
-      h('div', { class: 'grid grid-cols-2 gap-3' }, [
-        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Duración'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.duration = parseInt(e.target.value) }, [h('option', { value: 45 }, '45 min'), h('option', { value: 90 }, '90 min')])]),
-        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Modalidad'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.modality = e.target.value }, [['presencial', 'Presencial'], ['hibrida', 'Híbrida'], ['remota', 'Remota']].map(([v, l]) => h('option', { value: v }, l)))])]),
+      data.type === 'unit' ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Número de clases'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.numClasses = parseInt(e.target.value) }, [4, 5, 6, 7, 8].map(n => h('option', { value: n }, `${n} clases`)))]) : null,
+      data.type === 'monthly' ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Semanas del mes'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.numClasses = parseInt(e.target.value) }, [3, 4, 5].map(n => h('option', { value: n }, `${n} semanas`)))]) : null,
+      data.type === 'annual' ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Meses del año'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.numClasses = parseInt(e.target.value) }, [8, 9, 10, 11, 12].map(n => h('option', { value: n }, `${n} meses`)))]) : null,
+      data.type === 'evaluation' ? h('div', { class: 'grid grid-cols-2 gap-3' }, [
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Tipo de evaluación'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.evaluationType = e.target.value }, [['diagnostica', 'Diagnóstica'], ['formativa', 'Formativa'], ['sumativa', 'Sumativa']].map(([v, l]) => h('option', { value: v }, l)))]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Instrumento'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.instrument = e.target.value }, [['prueba', 'Prueba escrita'], ['rubrica', 'Rúbrica'], ['lista-cotejo', 'Lista de cotejo'], ['proyecto', 'Proyecto'], ['portafolio', 'Portafolio']].map(([v, l]) => h('option', { value: v }, l)))]),
+      ]) : null,
+      data.type !== 'annual' ? h('div', { class: 'grid grid-cols-2 gap-3' }, [
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, data.type === 'unit' ? 'Duración por clase' : 'Duración'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.duration = parseInt(e.target.value) }, [h('option', { value: 45 }, '45 min'), h('option', { value: 90 }, '90 min')])]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Modalidad'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.modality = e.target.value }, [['presencial', 'Presencial'], ['hibrida', 'Híbrida'], ['remota', 'Remota']].map(([v, l]) => h('option', { value: v }, l)))])]) : null,
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Estudiantes (aprox.)'), h('input', { type: 'number', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', placeholder: '30', onInput: (e) => data.studentCount = e.target.value })]),
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Conocimientos previos'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', rows: 2, placeholder: 'Lo que los estudiantes ya saben...', onInput: (e) => data.priorKnowledge = e.target.value }), h('p', { class: 'text-xs text-amber-600 mt-1' }, 'No uses nombres ni RUT de estudiantes.')]),
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Recursos (separados por coma)'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', placeholder: 'proyector, cuadernos, mapas', onInput: (e) => data.resources = e.target.value })]),
@@ -630,18 +675,71 @@ const WizardPage = defineComponent({
     ]);
 
     const step5 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
-      h('h2', { class: 'text-lg font-semibold' }, 'Estructura de la Clase'),
-      h('p', { class: 'text-sm text-slate-500' }, 'La estructura sugerida es: Inicio (10-15%) → Desarrollo (60-70%) → Cierre (10-15%). Puedes personalizarla después en el editor.'),
-      h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
-        h('p', { class: 'font-medium' }, 'Estructura estándar:'), h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [h('li', 'Inicio: Activación, propósito'), h('li', 'Desarrollo: Modelamiento, práctica, monitoreo'), h('li', 'Cierre: Síntesis, evaluación, retroalimentación')]),
+      h('h2', { class: 'text-lg font-semibold' }, 'Estructura'),
+      data.type === 'unit' ? h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, `Tu unidad de ${data.numClasses} clases tendrá una secuencia didáctica progresiva:`),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Estructura sugerida de unidad:'),
+          h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [
+            h('li', 'Clases 1-2: Activación y construcción de conocimientos'),
+            h('li', 'Clases 3-4: Aplicación y práctica guiada'),
+            h('li', 'Clases 5-6: Consolidación, transferencia y evaluación'),
+            h('li', 'Cada clase: Inicio → Desarrollo → Cierre con evaluación formativa'),
+          ]),
+        ]),
+      ]) : data.type === 'monthly' ? h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, `Tu mes se organizará en ${data.numClasses} semanas:`),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Estructura sugerida:'),
+          h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [
+            h('li', 'Distribución equilibrada de OA entre las semanas'),
+            h('li', 'Evaluación acumulativa al final del mes'),
+            h('li', 'Actividades con momentos inicio/desarrollo/cierre por semana'),
+          ]),
+        ]),
+      ]) : data.type === 'annual' ? h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, `Tu año se organizará en ${data.numClasses} meses:`),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Estructura sugerida:'),
+          h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [
+            h('li', 'Distribución progresiva de OA a lo largo del año'),
+            h('li', 'Complejidad creciente mes a mes'),
+            h('li', 'Evaluación formativa continua y sumativa al cierre'),
+          ]),
+        ]),
+      ]) : data.type === 'evaluation' ? h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, 'Tu evaluación se alineará al Decreto 67:'),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Componentes:'),
+          h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [
+            h('li', 'Indicadores de logro observables y medibles'),
+            h('li', 'Rúbrica con dimensiones y niveles (Logrado/Medio/En desarrollo)'),
+            h('li', 'Criterios de evaluación y estrategia de retroalimentación'),
+          ]),
+        ]),
+      ]) : data.type === 'multigrade' ? h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, `Tu clase combina ${levelLabel(data.level)} y ${levelLabel(data.level2)}:`),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Estructura sugerida:'),
+          h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [
+            h('li', 'Momentos de trabajo conjunto entre ambos niveles'),
+            h('li', 'Momentos de trabajo diferenciado por nivel'),
+            h('li', 'Criterios de evaluación diferenciados'),
+          ]),
+        ]),
+      ]) : h('div', { class: 'space-y-2' }, [
+        h('p', { class: 'text-sm text-slate-500' }, 'La estructura sugerida es: Inicio (10-15%) → Desarrollo (60-70%) → Cierre (10-15%). Puedes personalizarla después en el editor.'),
+        h('div', { class: 'bg-blue-50 p-4 rounded-lg text-sm space-y-1' }, [
+          h('p', { class: 'font-medium' }, 'Estructura estándar:'), h('ul', { class: 'list-disc pl-4 text-slate-600 space-y-0.5' }, [h('li', 'Inicio: Activación, propósito'), h('li', 'Desarrollo: Modelamiento, práctica, monitoreo'), h('li', 'Cierre: Síntesis, evaluación, retroalimentación')]),
+        ]),
       ]),
       h('button', { onClick: () => step.value = 6, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
     const step6 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
-      h('h2', { class: 'text-lg font-semibold' }, 'Evaluación'),
-      h('p', { class: 'text-sm text-slate-500' }, 'Define el enfoque de evaluación (Decreto N.° 67)'),
-      h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2' }, [h('option', { value: 'formativa' }, 'Evaluación Formativa'), h('option', { value: 'sumativa' }, 'Evaluación Sumativa')]),
+      h('h2', { class: 'text-lg font-semibold' }, data.type === 'annual' ? 'Evaluación Anual' : 'Evaluación'),
+      h('p', { class: 'text-sm text-slate-500' }, data.type === 'annual' ? 'La evaluación anual se define dentro de la distribución. Continúa para configurar la inclusión.' : 'Define el enfoque de evaluación (Decreto N.° 67)'),
+      data.type === 'annual' ? null : h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2' }, [h('option', { value: 'formativa' }, 'Evaluación Formativa'), h('option', { value: 'sumativa' }, 'Evaluación Sumativa')]),
       h('button', { onClick: () => step.value = 7, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
@@ -706,10 +804,15 @@ const WizardPage = defineComponent({
       Card([h('div', { class: 'p-4 space-y-2 text-sm' }, [
         h('p', { class: 'font-medium' }, 'Resumen de lo que se enviará a DeepSeek:'),
         h('ul', { class: 'text-slate-600 space-y-1 text-xs' }, [
-          h('li', `Nivel: ${levelLabel(data.level) || '-'}`),
+          h('li', `Tipo: ${({ class: 'Clase', unit: 'Unidad didáctica', monthly: 'Mensual', annual: 'Anual', evaluation: 'Evaluación', multigrade: 'Multigrado' })[data.type]}`),
+          h('li', `Nivel: ${data.type === 'multigrade' ? levelLabel(data.level) + ' + ' + levelLabel(data.level2) : (levelLabel(data.level) || '-')}`),
           h('li', `Asignatura: ${subjectLabel(data.subject)}`),
           h('li', `OA seleccionados: ${data.oaIds.length}`),
-          h('li', `Duración: ${data.duration} min · Modalidad: ${data.modality}`),
+          data.type === 'unit' ? h('li', `Clases: ${data.numClasses} · Duración por clase: ${data.duration} min`) : null,
+          data.type === 'monthly' ? h('li', `Semanas: ${data.numClasses} · Duración semanal: ${data.duration} min`) : null,
+          data.type === 'annual' ? h('li', `Meses: ${data.numClasses}`) : null,
+          data.type === 'evaluation' ? h('li', `Evaluación ${({ diagnostica: 'diagnóstica', formativa: 'formativa', sumativa: 'sumativa' })[data.evaluationType]} · Instrumento: ${({ prueba: 'prueba escrita', rubrica: 'rúbrica', 'lista-cotejo': 'lista de cotejo', proyecto: 'proyecto', portafolio: 'portafolio' })[data.instrument]}`) : null,
+          data.type !== 'annual' ? h('li', `Duración: ${data.duration} min · Modalidad: ${data.modality}`) : null,
           h('li', `Marco de inclusión: ${data.framework === 'dua' ? 'DUA (${data.dua.representacion.length + data.dua.accionExpresion.length + data.dua.implicacion.length} estrategias)' : 'Estándar'}`),
         ]),
         h('div', { class: 'bg-amber-50 border border-amber-200 p-3 rounded-lg mt-3 text-xs text-amber-800 space-y-1' }, [
@@ -738,6 +841,27 @@ const WizardPage = defineComponent({
       planning.value?.purpose ? Card([h('div', { class: 'p-4' }, [
         h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, 'Propósito'),
         h('p', { class: 'text-sm text-slate-600' }, planning.value.purpose),
+      ])]) : null,
+      planning.value?.unit?.title ? Card([h('div', { class: 'p-4' }, [
+        h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, planning.value.unit.title),
+        planning.value.unit.description ? h('p', { class: 'text-sm text-slate-600 mb-2' }, planning.value.unit.description) : null,
+        (planning.value.unit.classes || []).map(c => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-1 mb-2' }, [
+          h('p', { class: 'text-xs font-medium text-blue-600' }, `Clase ${c.number}: ${c.title} (${c.duration || '-'} min)`),
+          h('p', { class: 'text-xs text-slate-500' }, `${(c.activities || []).length} actividades · ${(c.oaCodes || []).join(', ')}`),
+        ])),
+        (planning.value.unit.weeks || []).map(w => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-1 mb-2' }, [
+          h('p', { class: 'text-xs font-medium text-blue-600' }, `Semana ${w.number}: ${w.topic}`),
+          h('p', { class: 'text-xs text-slate-500' }, `${(w.activities || []).length} actividades · ${(w.oaCodes || []).join(', ')}`),
+        ])),
+        (planning.value.unit.months || []).map(m => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-1 mb-2' }, [
+          h('p', { class: 'text-xs font-medium text-blue-600' }, `Mes ${m.number}: ${m.name || ''} — ${m.topic || ''}`),
+          h('p', { class: 'text-xs text-slate-500' }, (m.oaCodes || []).join(', ')),
+        ])),
+      ])]) : null,
+      planning.value?.evaluation ? Card([h('div', { class: 'p-4' }, [
+        h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, 'Evaluación'),
+        h('p', { class: 'text-xs text-blue-600' }, `Tipo: ${planning.value.evaluation.type} · ${(planning.value.evaluation.instrument || []).join(', ')}`),
+        ...(planning.value.evaluation.indicators || []).map(ind => h('p', { class: 'text-xs text-slate-600' }, `• ${ind}`)),
       ])]) : null,
       planning.value?.activities?.length > 0 ? Card([h('div', { class: 'p-4' }, [
         h('h3', { class: 'font-medium text-sm text-slate-700 mb-2' }, 'Actividades'),
@@ -863,8 +987,9 @@ const PlanningDetailPage = defineComponent({
             statusBadge(planning.value.status),
           ]),
           h('div', { class: 'flex flex-wrap gap-2 text-xs text-slate-500' }, [
-            h('span', { class: 'bg-slate-100 px-2 py-1 rounded' }, planning.value.level?.replace('-basico', '° básico')),
-            h('span', { class: 'bg-slate-100 px-2 py-1 rounded' }, planning.value.duration + ' min'),
+            h('span', { class: 'bg-blue-50 text-blue-700 px-2 py-1 rounded' }, ({ class: 'Clase', unit: 'Unidad didáctica', monthly: 'Mensual', annual: 'Anual', evaluation: 'Evaluación', multigrade: 'Multigrado' })[planning.value.type] || 'Clase'),
+            h('span', { class: 'bg-slate-100 px-2 py-1 rounded' }, planning.value.levels?.length ? planning.value.levels.map(l => levelLabel(l)).join(' + ') : (planning.value.level?.replace('-basico', '° básico'))),
+            planning.value.type !== 'annual' ? h('span', { class: 'bg-slate-100 px-2 py-1 rounded' }, planning.value.duration + ' min') : null,
             h('span', { class: 'bg-slate-100 px-2 py-1 rounded' }, planning.value.modality),
             planning.value.approvedAt ? h('span', { class: 'bg-green-100 text-green-700 px-2 py-1 rounded' }, `Aprobada: ${new Date(planning.value.approvedAt).toLocaleDateString('es-CL')}`) : null,
           ]),
@@ -876,6 +1001,48 @@ const PlanningDetailPage = defineComponent({
             h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, 'Propósito'),
             h('p', { class: 'text-sm text-slate-600' }, planning.value.purpose),
           ]) : null,
+          planning.value.unit ? h('div', [
+            h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, planning.value.unit.title || 'Unidad'),
+            planning.value.unit.description ? h('p', { class: 'text-xs text-slate-500 mb-2' }, planning.value.unit.description) : null,
+            (planning.value.unit.classes || []).map(c => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-2 mb-2' }, [
+              h('p', { class: 'text-xs font-medium text-blue-600' }, `Clase ${c.number}: ${c.title} (${c.duration || '-'} min)`),
+              c.purpose ? h('p', { class: 'text-xs text-slate-600' }, c.purpose) : null,
+              (c.activities || []).map(a => h('div', { class: 'ml-2 border-l border-slate-200 pl-2 py-0.5' }, [
+                h('span', { class: 'text-xs font-medium text-slate-500' }, `${a.moment} · ${a.duration} min: `),
+                h('span', { class: 'text-xs text-slate-600' }, a.title || a.description),
+              ])),
+            ])),
+            (planning.value.unit.weeks || []).map(w => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-2 mb-2' }, [
+              h('p', { class: 'text-xs font-medium text-blue-600' }, `Semana ${w.number}: ${w.topic}`),
+              h('p', { class: 'text-xs text-slate-500' }, (w.oaCodes || []).join(', ')),
+              (w.activities || []).map(a => h('div', { class: 'ml-2 border-l border-slate-200 pl-2 py-0.5' }, [
+                h('span', { class: 'text-xs font-medium text-slate-500' }, `${a.moment} · ${a.duration} min: `),
+                h('span', { class: 'text-xs text-slate-600' }, a.title || a.description),
+              ])),
+            ])),
+            (planning.value.unit.months || []).map(m => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-1 mb-1' }, [
+              h('p', { class: 'text-xs font-medium text-blue-600' }, `Mes ${m.number}: ${m.name || ''} — ${m.topic || ''}`),
+              h('p', { class: 'text-xs text-slate-500' }, (m.oaCodes || []).join(', ')),
+              m.notes ? h('p', { class: 'text-xs text-slate-400' }, m.notes) : null,
+            ])),
+            planning.value.unit.assessment?.criteria?.length ? h('div', { class: 'mt-2' }, [
+              h('p', { class: 'text-xs font-medium text-slate-700' }, 'Evaluación de la unidad/periodo:'),
+              ...planning.value.unit.assessment.criteria.map(c => h('p', { class: 'text-xs text-slate-600' }, `• ${c}`)),
+            ]) : null,
+          ]) : null,
+          planning.value.evaluation ? h('div', [
+            h('h3', { class: 'font-medium text-sm text-slate-700 mb-1' }, 'Evaluación'),
+            h('p', { class: 'text-xs text-slate-500' }, `Tipo: ${planning.value.evaluation.type} · Instrumento: ${(planning.value.evaluation.instrument || []).join(', ')}`),
+            planning.value.evaluation.description ? h('p', { class: 'text-xs text-slate-600 mt-1' }, planning.value.evaluation.description) : null,
+            (planning.value.evaluation.indicators || []).length ? h('div', { class: 'mt-2' }, [
+              h('p', { class: 'text-xs font-medium text-slate-700' }, 'Indicadores de logro:'),
+              ...planning.value.evaluation.indicators.map(i => h('p', { class: 'text-xs text-slate-600' }, `• ${i}`)),
+            ]) : null,
+            (planning.value.evaluation.rubric || []).map(r => h('div', { class: 'border-l-2 border-blue-300 pl-3 py-1 mb-1' }, [
+              h('p', { class: 'text-xs font-medium text-blue-600' }, r.dimension || r.name),
+              h('p', { class: 'text-xs text-slate-500' }, `Logrado: ${r.logrado || '-'} · Medio: ${r.medio || '-'} · En desarrollo: ${r.enDesarrollo || '-'}`),
+            ])),
+          ]) : null,
           planning.value.activities?.length > 0 ? h('div', [
             h('h3', { class: 'font-medium text-sm text-slate-700 mb-2' }, 'Actividades'),
             ...planning.value.activities.map((a, i) =>
@@ -883,6 +1050,7 @@ const PlanningDetailPage = defineComponent({
                 h('div', { class: 'flex items-center gap-2 text-xs' }, [
                   h('span', { class: 'font-medium text-blue-600' }, a.moment),
                   h('span', { class: 'text-slate-400' }, a.duration + ' min'),
+                  a.targetLevel ? h('span', { class: 'bg-slate-100 px-1.5 py-0.5 rounded text-[10px] text-slate-600' }, levelLabel(a.targetLevel)) : null,
                 ]),
                 h('p', { class: 'text-sm' }, a.description || a.title),
               ])
@@ -980,8 +1148,10 @@ const ManualEditor = defineComponent({
     const isEditing = id && id !== 'nueva-manual' && id.length > 10;
 
     const form = reactive({
+      type: 'class',
       title: '',
       level: '',
+      level2: '',
       subject: 'historia-geografia-ciencias-sociales',
       unit: '',
       oaCode: '',
@@ -994,6 +1164,8 @@ const ManualEditor = defineComponent({
       methodology: '',
       purpose: '',
       activities: [],
+      unitData: null,
+      evaluationData: null,
       assessmentType: 'formativa',
       assessmentCriteria: '',
       assessmentFeedback: '',
@@ -1054,8 +1226,10 @@ const ManualEditor = defineComponent({
           const d = snap.data();
           planningId.value = d.id || id;
           status.value = d.status || 'draft';
+          form.type = d.type || 'class';
           form.title = d.title || '';
           form.level = d.level || '';
+          form.level2 = d.levels?.[1] || '';
           form.unit = d.unit || '';
           form.oaCode = d.learningObjectives?.[0]?.code || '';
           form.oaText = d.learningObjectives?.[0]?.text || '';
@@ -1067,6 +1241,8 @@ const ManualEditor = defineComponent({
           form.methodology = d.methodology || '';
           form.purpose = d.purpose || '';
           form.activities = d.activities || [];
+          form.unitData = d.unit || null;
+          form.evaluationData = d.evaluation || null;
           form.assessmentType = d.assessment?.type || 'formativa';
           form.assessmentCriteria = (d.assessment?.criteria || []).join(', ');
           form.assessmentFeedback = d.assessment?.feedbackStrategy || '';
@@ -1131,11 +1307,13 @@ const ManualEditor = defineComponent({
       error.value = '';
       const buildData = () => ({
         userId: store.user.uid,
+        type: form.type || 'class',
         title: form.title || 'Sin título',
         status: isAutosave ? 'draft' : status.value,
         level: form.level,
+        levels: form.type === 'multigrade' && form.level2 ? [form.level, form.level2] : null,
         subject: form.subject,
-        unit: form.unit,
+        unit: (form.type === 'unit' || form.type === 'monthly' || form.type === 'annual') ? (form.unitData || {}) : form.unit,
         duration: parseInt(form.duration) || 45,
         modality: form.modality,
         studentCount: form.studentCount,
@@ -1145,6 +1323,7 @@ const ManualEditor = defineComponent({
         learningObjectives: form.oaCode ? [{ code: form.oaCode, text: form.oaText, source: 'Ingreso manual' }] : [],
         purpose: form.purpose,
         activities: form.activities,
+        evaluation: form.type === 'evaluation' ? (form.evaluationData || null) : null,
         assessment: {
           type: form.assessmentType,
           criteria: form.assessmentCriteria ? form.assessmentCriteria.split(',').map(r => r.trim()).filter(Boolean) : [],
@@ -1221,6 +1400,64 @@ const ManualEditor = defineComponent({
       [form.activities[idx], form.activities[target]] = [form.activities[target], form.activities[idx]];
     };
 
+    // ── Structure por tipo (unit/monthly/annual/evaluation) ──
+    const ensureUnit = () => {
+      if (!form.unitData || typeof form.unitData !== 'object') form.unitData = { title: form.unit || 'Unidad', description: '', assessment: { type: 'formativa', criteria: [], feedbackStrategy: '' } };
+      return form.unitData;
+    };
+    const unitItemsKey = () => ({ unit: 'classes', monthly: 'weeks', annual: 'months' })[form.type];
+    const unitItemLabel = () => ({ unit: 'clase', monthly: 'semana', annual: 'mes' })[form.type] || 'clase';
+    const unitItemTitle = () => ({ unit: 'Clase', monthly: 'Semana', annual: 'Mes' })[form.type] || 'Clase';
+
+    const addUnitItem = () => {
+      const u = ensureUnit();
+      const key = unitItemsKey();
+      if (!Array.isArray(u[key])) u[key] = [];
+      const n = u[key].length + 1;
+      if (form.type === 'annual') {
+        u[key].push({ number: n, name: `Mes ${n}`, topic: '', oaCodes: [], notes: '' });
+      } else if (form.type === 'monthly') {
+        u[key].push({ number: n, topic: `Semana ${n}`, oaCodes: [], duration: 90, activities: [], assessment: { type: 'formativa', criteria: [], feedbackStrategy: '' } });
+      } else {
+        u[key].push({ number: n, title: `Clase ${n}`, purpose: '', oaCodes: [], duration: 45, activities: [], assessment: { type: 'formativa', criteria: [], feedbackStrategy: '' } });
+      }
+    };
+    const removeUnitItem = (idx) => {
+      const u = ensureUnit();
+      const key = unitItemsKey();
+      if (Array.isArray(u[key])) u[key].splice(idx, 1);
+    };
+    const addUnitActivity = (item) => {
+      if (!Array.isArray(item.activities)) item.activities = [];
+      item.activities.push({ moment: 'desarrollo', title: '', description: '', duration: 15, keyQuestions: [], monitoringStrategy: '', evidence: '' });
+    };
+    const removeUnitActivity = (item, idx) => {
+      if (Array.isArray(item.activities)) item.activities.splice(idx, 1);
+    };
+    const addEvalCriterion = (target) => {
+      if (!Array.isArray(target.criteria)) target.criteria = [];
+      target.criteria.push('');
+    };
+    const removeEvalCriterion = (target, idx) => {
+      if (Array.isArray(target.criteria)) target.criteria.splice(idx, 1);
+    };
+    const addIndicator = () => {
+      if (!form.evaluationData) form.evaluationData = { type: 'formativa', instrument: ['prueba'], description: '', indicators: [], rubric: [], criteria: [], feedbackStrategy: '' };
+      if (!Array.isArray(form.evaluationData.indicators)) form.evaluationData.indicators = [];
+      form.evaluationData.indicators.push('');
+    };
+    const removeIndicator = (idx) => {
+      if (Array.isArray(form.evaluationData?.indicators)) form.evaluationData.indicators.splice(idx, 1);
+    };
+    const addRubricRow = () => {
+      if (!form.evaluationData) form.evaluationData = { type: 'formativa', instrument: [], indicators: [], rubric: [], criteria: [], feedbackStrategy: '' };
+      if (!Array.isArray(form.evaluationData.rubric)) form.evaluationData.rubric = [];
+      form.evaluationData.rubric.push({ dimension: '', logrado: '', medio: '', enDesarrollo: '' });
+    };
+    const removeRubricRow = (idx) => {
+      if (Array.isArray(form.evaluationData?.rubric)) form.evaluationData.rubric.splice(idx, 1);
+    };
+
     const approve = async () => {
       if (!planningId.value) { error.value = 'Guarda primero la planificación'; return; }
       saving.value = true;
@@ -1288,6 +1525,103 @@ const ManualEditor = defineComponent({
       ]);
     };
 
+    const renderUnitStructureEditor = () => {
+      const u = ensureUnit();
+      const key = unitItemsKey();
+      const items = Array.isArray(u[key]) ? u[key] : [];
+      return renderSection(form.type === 'unit' ? 'Estructura de la Unidad' : (form.type === 'monthly' ? 'Estructura del Mes' : 'Estructura del Año'), '🧩', [
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Título de la unidad'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', value: u.title, onInput: (e) => u.title = e.target.value })]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Descripción'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', rows: 2, value: u.description, onInput: (e) => u.description = e.target.value })]),
+        h('div', { class: 'flex items-center justify-between' }, [
+          h('p', { class: 'text-xs text-slate-500' }, `${items.length} ${unitItemLabel()}${items.length === 1 ? '' : 's'}`),
+          h('button', { onClick: addUnitItem, class: 'text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition' }, `+ Agregar ${unitItemLabel()}`),
+        ]),
+        items.map((item, idx) => Card([h('div', { class: 'p-3 space-y-2' }, [
+          h('div', { class: 'flex items-center justify-between' }, [
+            h('span', { class: 'text-xs font-medium text-slate-500' }, `${unitItemTitle()} #${idx + 1}`),
+            h('button', { onClick: () => removeUnitItem(idx), class: 'text-xs text-red-400 hover:text-red-600' }, '✕'),
+          ]),
+          form.type === 'annual'
+            ? [
+                h('div', { class: 'grid grid-cols-2 gap-2' }, [
+                  h('div', [h('label', { class: 'text-xs text-slate-500' }, 'Tema'), h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: item.topic, onInput: (e) => item.topic = e.target.value })]),
+                  h('div', [h('label', { class: 'text-xs text-slate-500' }, 'OAs (separados por coma)'), h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: (item.oaCodes || []).join(', '), onInput: (e) => item.oaCodes = e.target.value.split(',').map(s => s.trim()).filter(Boolean) })]),
+                ]),
+                h('div', [h('label', { class: 'text-xs text-slate-500' }, 'Notas'), h('textarea', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', rows: 2, value: item.notes, onInput: (e) => item.notes = e.target.value })]),
+              ]
+            : [
+                h('div', [h('label', { class: 'text-xs text-slate-500' }, 'Título'), h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: item.title || item.topic, onInput: (e) => item.title = e.target.value, placeholder: `Título de la ${unitItemLabel()}` })]),
+                h('div', [h('label', { class: 'text-xs text-slate-500' }, 'Propósito'), h('textarea', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', rows: 2, value: item.purpose, onInput: (e) => item.purpose = e.target.value, placeholder: '¿Qué aprenderán en esta clase/semana?' })]),
+                h('div', { class: 'grid grid-cols-2 gap-2' }, [
+                  h('div', [h('label', { class: 'text-xs text-slate-500' }, 'OAs (separados por coma)'), h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: (item.oaCodes || []).join(', '), onInput: (e) => item.oaCodes = e.target.value.split(',').map(s => s.trim()).filter(Boolean) })]),
+                  h('div', [h('label', { class: 'text-xs text-slate-500' }, 'Duración (min)'), h('input', { type: 'number', class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: item.duration, onInput: (e) => item.duration = parseInt(e.target.value) || 45 })]),
+                ]),
+                h('div', { class: 'flex items-center justify-between mt-1' }, [
+                  h('p', { class: 'text-xs text-slate-500' }, `Actividades: ${item.activities?.length || 0}`),
+                  h('button', { onClick: () => addUnitActivity(item), class: 'text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition' }, '+ Actividad'),
+                ]),
+                (item.activities || []).map((act, actIdx) => h('div', { class: 'border border-slate-100 rounded p-2 space-y-1' }, [
+                  h('div', { class: 'flex items-center justify-between' }, [
+                    h('span', { class: 'text-xs text-slate-400' }, `Actividad ${actIdx + 1}`),
+                    h('button', { onClick: () => removeUnitActivity(item, actIdx), class: 'text-xs text-red-400 hover:text-red-600' }, '✕'),
+                  ]),
+                  h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: act.title, onInput: (e) => act.title = e.target.value, placeholder: 'Título' }),
+                  h('textarea', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', rows: 2, value: act.description, onInput: (e) => act.description = e.target.value, placeholder: 'Descripción' }),
+                ])),
+                h('div', { class: 'border-t border-slate-100 pt-2' }, [
+                  h('p', { class: 'text-xs text-slate-500 mb-1' }, 'Evaluación de la clase/semana'),
+                  h('select', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: item.assessment?.type || 'formativa', onChange: (e) => { if (!item.assessment) item.assessment = {}; item.assessment.type = e.target.value; } }, [h('option', { value: 'formativa' }, 'Formativa'), h('option', { value: 'sumativa' }, 'Sumativa')]),
+                  h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs mt-1', value: (item.assessment?.criteria || []).join(', '), onInput: (e) => { if (!item.assessment) item.assessment = {}; item.assessment.criteria = e.target.value.split(',').map(s => s.trim()).filter(Boolean); }, placeholder: 'Criterios (separados por coma)' }),
+                ]),
+              ],
+        ])], ' mb-2')),
+        h('div', { class: 'border-t border-slate-200 pt-2' }, [
+          h('p', { class: 'text-xs text-slate-500 mb-1' }, 'Evaluación de la unidad'),
+          h('select', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: u.assessment?.type || 'formativa', onChange: (e) => { if (!u.assessment) u.assessment = {}; u.assessment.type = e.target.value; } }, [h('option', { value: 'formativa' }, 'Formativa'), h('option', { value: 'sumativa' }, 'Sumativa')]),
+          h('div', { class: 'flex items-center gap-1 mt-1' }, [
+            h('input', { class: 'flex-1 border border-slate-200 rounded px-2 py-1 text-xs', value: (u.assessment?.criteria || []).join(', '), onInput: (e) => { if (!u.assessment) u.assessment = {}; u.assessment.criteria = e.target.value.split(',').map(s => s.trim()).filter(Boolean); }, placeholder: 'Criterios (separados por coma)' }),
+          ]),
+        ]),
+      ]);
+    };
+
+    const renderEvaluationEditor = () => {
+      if (!form.evaluationData) form.evaluationData = { type: 'formativa', instrument: ['prueba'], description: '', indicators: [], rubric: [], criteria: [], feedbackStrategy: '' };
+      const ev = form.evaluationData;
+      return renderSection('Evaluación (Decreto 67)', '📊', [
+        h('div', { class: 'grid grid-cols-2 gap-2' }, [
+          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Tipo'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', value: ev.type, onChange: (e) => ev.type = e.target.value }, [['formativa', 'Formativa'], ['sumativa', 'Sumativa'], ['diagnostica', 'Diagnóstica']].map(([v, l]) => h('option', { value: v }, l)))]),
+          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Instrumento'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', value: (ev.instrument || []).join(', '), onInput: (e) => ev.instrument = e.target.value.split(',').map(s => s.trim()).filter(Boolean), placeholder: 'prueba, lista de cotejo...' })]),
+        ]),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Descripción'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', rows: 2, value: ev.description, onInput: (e) => ev.description = e.target.value })]),
+        h('div', { class: 'flex items-center justify-between' }, [
+          h('p', { class: 'text-xs text-slate-500' }, `Indicadores: ${ev.indicators?.length || 0}`),
+          h('button', { onClick: addIndicator, class: 'text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition' }, '+ Indicador'),
+        ]),
+        (ev.indicators || []).map((ind, idx) => h('div', { class: 'flex items-center gap-1' }, [
+          h('input', { class: 'flex-1 border border-slate-200 rounded px-2 py-1 text-xs', value: ind, onInput: (e) => ev.indicators[idx] = e.target.value, placeholder: 'Ej: identifica las etapas del ciclo del agua' }),
+          h('button', { onClick: () => removeIndicator(idx), class: 'text-xs text-red-400 hover:text-red-600' }, '✕'),
+        ])),
+        h('div', { class: 'flex items-center justify-between mt-2' }, [
+          h('p', { class: 'text-xs text-slate-500' }, `Rúbrica: ${ev.rubric?.length || 0} filas`),
+          h('button', { onClick: addRubricRow, class: 'text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition' }, '+ Fila de rúbrica'),
+        ]),
+        (ev.rubric || []).map((row, idx) => h('div', { class: 'border border-slate-100 rounded p-2 space-y-1' }, [
+          h('div', { class: 'flex items-center justify-between' }, [
+            h('span', { class: 'text-xs text-slate-400' }, `Dimensión ${idx + 1}`),
+            h('button', { onClick: () => removeRubricRow(idx), class: 'text-xs text-red-400 hover:text-red-600' }, '✕'),
+          ]),
+          h('input', { class: 'w-full border border-slate-200 rounded px-2 py-1 text-xs', value: row.dimension, onInput: (e) => row.dimension = e.target.value, placeholder: 'Dimensión' }),
+          h('div', { class: 'grid grid-cols-3 gap-1' }, [
+            h('input', { class: 'border border-slate-200 rounded px-2 py-1 text-xs', value: row.logrado, onInput: (e) => row.logrado = e.target.value, placeholder: 'Logrado' }),
+            h('input', { class: 'border border-slate-200 rounded px-2 py-1 text-xs', value: row.medio, onInput: (e) => row.medio = e.target.value, placeholder: 'Medio' }),
+            h('input', { class: 'border border-slate-200 rounded px-2 py-1 text-xs', value: row.enDesarrollo, onInput: (e) => row.enDesarrollo = e.target.value, placeholder: 'En desarrollo' }),
+          ]),
+        ])),
+        h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Estrategia de retroalimentación'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', rows: 2, value: ev.feedbackStrategy, onInput: (e) => ev.feedbackStrategy = e.target.value })]),
+      ]);
+    };
+
     // Cleanup on unmount
     const origBeforeUnmount = null;
 
@@ -1305,8 +1639,12 @@ const ManualEditor = defineComponent({
             // Sidebar
             h('div', { class: 'lg:col-span-1 space-y-3' }, [
               renderSection('Información', '📋', [
-                inputField('Título', 'title', { placeholder: 'Título de la clase' }),
+                h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-0.5' }, 'Tipo de planificación'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none', value: form.type, onChange: (e) => { form.type = e.target.value; } }, [['class', 'Clase'], ['unit', 'Unidad'], ['monthly', 'Mensual'], ['annual', 'Anual'], ['evaluation', 'Evaluación'], ['multigrade', 'Multigrado']].map(([v, l]) => h('option', { value: v }, l)))]),
+                inputField('Título', 'title', { placeholder: 'Título de la planificación' }),
                 inputField('Nivel', 'level', { type: 'select', options: [h('option', { value: '' }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))] }),
+                form.type === 'multigrade'
+                  ? inputField('Nivel 2 (multigrado)', 'level2', { type: 'select', options: [h('option', { value: '' }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))] })
+                  : null,
                 inputField('Duración', 'duration', { type: 'select', options: [h('option', { value: 45 }, '45 min'), h('option', { value: 90 }, '90 min')] }),
                 inputField('Modalidad', 'modality', { type: 'select', options: [['presencial', 'Presencial'], ['hibrida', 'Híbrida'], ['remota', 'Remota']].map(([v, l]) => h('option', { value: v }, l)) }),
               ]),
@@ -1326,14 +1664,16 @@ const ManualEditor = defineComponent({
             // Main content
             h('div', { class: 'lg:col-span-2 space-y-3' }, [
               renderSection('Propósito', '🎯', [
-                inputField('Propósito de la clase', 'purpose', { type: 'textarea', rows: 2, placeholder: '¿Qué aprenderán los estudiantes hoy?' }),
+                inputField('Propósito', 'purpose', { type: 'textarea', rows: 2, placeholder: '¿Qué aprenderán los estudiantes?' }),
               ]),
-              renderActivities(),
-              renderSection('Evaluación', '📊', [
+              (form.type === 'unit' || form.type === 'monthly' || form.type === 'annual') ? renderUnitStructureEditor() : null,
+              (form.type === 'evaluation') ? renderEvaluationEditor() : null,
+              (form.type === 'class' || form.type === 'multigrade') ? renderActivities() : null,
+              (form.type === 'class' || form.type === 'multigrade') ? renderSection('Evaluación', '📊', [
                 inputField('Tipo', 'assessmentType', { type: 'select', options: [h('option', { value: 'formativa' }, 'Formativa'), h('option', { value: 'sumativa' }, 'Sumativa')] }),
                 inputField('Criterios (separados por coma)', 'assessmentCriteria', { placeholder: 'Identifica, analiza, compara...' }),
                 inputField('Estrategia de retroalimentación', 'assessmentFeedback', { type: 'textarea', rows: 2, placeholder: '¿Cómo darás retroalimentación?' }),
-              ]),
+              ]) : null,
               renderSection('Diferenciación', '🌈', [
                 inputField('Diferenciación', 'differentiation', { type: 'textarea', rows: 2, placeholder: 'Adecuaciones para distintos estudiantes...' }),
                 h('p', { class: 'text-xs text-amber-600' }, 'Describe necesidades en términos pedagógicos, sin diagnósticos.'),

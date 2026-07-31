@@ -48,12 +48,42 @@ const DEFAULT_LIMITS = {
   requestTimeoutMs: 30000,
 };
 
+const PLANNING_TYPES = {
+  class: { label: 'Clase', minOA: 1, maxOA: 4 },
+  unit: { label: 'Unidad didáctica', minOA: 1, maxOA: 8 },
+  monthly: { label: 'Planificación mensual', minOA: 1, maxOA: 10 },
+  annual: { label: 'Planificación anual', minOA: 1, maxOA: 12 },
+  evaluation: { label: 'Evaluación', minOA: 1, maxOA: 4 },
+  multigrade: { label: 'Multigrado', minOA: 1, maxOA: 6 },
+};
+
 const VALIDATION_RULES = [
-  { id: 'V-001', type: 'critical', check: (p) => p.activities?.length > 0 },
-  { id: 'V-004', type: 'critical', check: (p) => p.assessment?.criteria?.length > 0 },
-  { id: 'V-007', type: 'warning', check: (p) => p.activities?.some(a => a.moment === 'cierre') },
-  { id: 'V-009', type: 'warning', check: (p) => p.assessment?.feedbackStrategy?.length > 0 },
+  { id: 'V-001', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.indicators?.length > 0) : (p.activities?.length > 0) },
+  { id: 'V-004', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.criteria?.length > 0) : (p.assessment?.criteria?.length > 0) },
+  { id: 'V-007', type: 'warning', check: (p) => {
+    if (p.type === 'unit') return p.unit?.classes?.length > 0 && p.unit.classes.some(c => c.activities?.some(a => a.moment === 'cierre'));
+    if (p.type === 'monthly') return p.unit?.weeks?.length > 0;
+    if (p.type === 'annual') return p.unit?.months?.length > 0;
+    if (p.type === 'evaluation') return (p.evaluation?.rubric?.length > 0) || (p.evaluation?.instrument?.length > 0);
+    return p.activities?.some(a => a.moment === 'cierre');
+  }},
+  { id: 'V-009', type: 'warning', check: (p) => p.type === 'evaluation' ? (p.evaluation?.feedbackStrategy?.length > 0) : (p.assessment?.feedbackStrategy?.length > 0) },
   { id: 'V-006', type: 'warning', check: (p) => {
+    if (p.type === 'unit') {
+      const first = p.unit?.classes?.[0];
+      if (!first) return true;
+      const total = (first.activities || []).reduce((s, a) => s + (a.duration || 0), 0);
+      return total >= first.duration * 0.8 && total <= first.duration * 1.1;
+    }
+    if (p.type === 'monthly') {
+      const weeks = p.unit?.weeks || [];
+      if (weeks.length === 0) return true;
+      return weeks.every(w => {
+        const total = (w.activities || []).reduce((s, a) => s + (a.duration || 0), 0);
+        return w.duration ? (total >= w.duration * 0.6 && total <= w.duration * 1.1) : true;
+      });
+    }
+    if (p.type === 'evaluation') return true;
     const totalActivityTime = (p.activities || []).reduce((sum, a) => sum + (a.duration || 0), 0);
     return totalActivityTime >= p.duration * 0.8 && totalActivityTime <= p.duration * 1.1;
   }},
@@ -75,9 +105,37 @@ function sanitizeInput(text) {
   return sanitized;
 }
 
-function validateOutputStructure(data) {
+function validateOutputStructure(data, type = 'class') {
   const errors = [];
   if (!data.purpose || data.purpose.length < 5) errors.push('Falta propósito válido');
+
+  if (type === 'evaluation') {
+    if (!data.evaluation?.indicators?.length) errors.push('Faltan indicadores de evaluación');
+    if (!data.evaluation?.criteria?.length) errors.push('Faltan criterios de evaluación');
+    return errors;
+  }
+
+  if (type === 'unit' || type === 'monthly') {
+    const items = type === 'unit' ? data.unit?.classes : data.unit?.weeks;
+    if (!items?.length) errors.push(`Faltan ${type === 'unit' ? 'clases' : 'semanas'}`);
+    else {
+      for (const it of items) {
+        if (!it.activities?.length) errors.push(`${type === 'unit' ? 'Clase' : 'Semana'} sin actividades`);
+        else for (const act of it.activities) {
+          if (!act.moment) errors.push('Actividad sin momento');
+          if (!act.description) errors.push('Actividad sin descripción');
+        }
+      }
+    }
+    if (!data.unit?.assessment?.criteria?.length && type === 'unit') errors.push('Faltan criterios de evaluación de unidad');
+    return errors;
+  }
+
+  if (type === 'annual') {
+    if (!data.unit?.months?.length) errors.push('Faltan meses');
+    return errors;
+  }
+
   if (!data.activities?.length) errors.push('Faltan actividades');
   else {
     for (const act of data.activities) {
@@ -136,7 +194,7 @@ function extractJson(text) {
 
 // Normaliza la respuesta del modelo (DeepSeek/Gemini) al schema interno
 // Los modelos a veces envuelven en "planificacion" y usan nombres en español.
-function normalizePlanningOutput(data) {
+function normalizePlanningOutput(data, type = 'class') {
   if (!data || typeof data !== 'object') return {};
 
   const root = data.planificacion && typeof data.planificacion === 'object' ? data.planificacion : data;
@@ -174,37 +232,140 @@ function normalizePlanningOutput(data) {
       keyQuestions: pick(a, ['keyQuestions', 'preguntas_clave', 'preguntasClave']) || [],
       monitoringStrategy: pick(a, ['monitoringStrategy', 'monitoreo', 'estrategia_monitoreo']) || '',
       evidence: pick(a, ['evidence', 'evidencia']) || '',
+      targetLevel: pick(a, ['targetLevel', 'nivel']) || '',
     })).filter(a => a.moment && a.description);
   };
 
-  const rawAssessment = pick(root, ['assessment', 'evaluacion', 'evaluación']);
-  const normalizedAssessment = rawAssessment && typeof rawAssessment === 'object' ? {
-    type: pick(rawAssessment, ['type', 'tipo']) || 'formativa',
-    criteria: Array.isArray(pick(rawAssessment, ['criteria', 'criterios']))
-      ? pick(rawAssessment, ['criteria', 'criterios'])
-      : String(pick(rawAssessment, ['criteria', 'criterios']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
-    feedbackStrategy: pick(rawAssessment, ['feedbackStrategy', 'retroalimentacion', 'retroalimentación']) || '',
-  } : { type: 'formativa', criteria: [], feedbackStrategy: '' };
+  const normalizeAssessment = (raw) => {
+    if (!raw || typeof raw !== 'object') return { type: 'formativa', criteria: [], feedbackStrategy: '' };
+    return {
+      type: pick(raw, ['type', 'tipo']) || 'formativa',
+      criteria: Array.isArray(pick(raw, ['criteria', 'criterios']))
+        ? pick(raw, ['criteria', 'criterios'])
+        : String(pick(raw, ['criteria', 'criterios']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+      feedbackStrategy: pick(raw, ['feedbackStrategy', 'retroalimentacion', 'retroalimentación']) || '',
+    };
+  };
 
-  const resources = pick(root, ['resources', 'recursos']);
-  const normalizedResources = Array.isArray(resources)
-    ? resources
-    : String(resources || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+  const normalizeResources = (resources) => {
+    if (Array.isArray(resources)) return resources;
+    return String(resources || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+  };
 
-  const rawDua = pick(root, ['dua']);
-  const normalizedDua = rawDua && typeof rawDua === 'object' ? {
+  const normalizeDua = (rawDua) => rawDua && typeof rawDua === 'object' ? {
     representacion: Array.isArray(rawDua.representacion) ? rawDua.representacion : [],
     accionExpresion: Array.isArray(rawDua.accionExpresion) ? rawDua.accionExpresion : [],
     implicacion: Array.isArray(rawDua.implicacion) ? rawDua.implicacion : [],
   } : null;
 
-  return {
+  const common = {
     purpose: pick(root, ['purpose', 'proposito', 'propósito', 'objetivo']) || '',
-    activities: normalizeActivities(pick(root, ['activities', 'actividades'])),
-    assessment: normalizedAssessment,
     differentiation: pick(root, ['differentiation', 'diferenciacion', 'diferenciación']) || '',
-    resources: normalizedResources,
-    dua: normalizedDua,
+    resources: normalizeResources(pick(root, ['resources', 'recursos'])),
+    dua: normalizeDua(pick(root, ['dua'])),
+  };
+
+  // ── EVALUACIÓN STANDALONE ──────────────────────────
+  if (type === 'evaluation') {
+    const rawEval = pick(root, ['evaluation', 'evaluacion', 'evaluación', 'assessment']) || {};
+    const rawInstruments = pick(rawEval, ['instruments', 'instrumentos']) || [];
+    const rawRubric = pick(rawEval, ['rubric', 'rubrica', 'rúbrica']);
+    return {
+      ...common,
+      evaluation: {
+        type: pick(rawEval, ['type', 'tipo']) || 'formativa',
+        instrument: Array.isArray(rawInstruments) ? rawInstruments : [String(rawInstruments || '')].filter(Boolean),
+        description: pick(rawEval, ['description', 'descripcion']) || '',
+        indicators: Array.isArray(pick(rawEval, ['indicators', 'indicadores']))
+          ? pick(rawEval, ['indicators', 'indicadores'])
+          : String(pick(rawEval, ['indicators', 'indicadores']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+        rubric: Array.isArray(rawRubric) ? rawRubric : (rawRubric && typeof rawRubric === 'object' ? [rawRubric] : []),
+        criteria: Array.isArray(pick(rawEval, ['criteria', 'criterios']))
+          ? pick(rawEval, ['criteria', 'criterios'])
+          : String(pick(rawEval, ['criteria', 'criterios']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+        feedbackStrategy: pick(rawEval, ['feedbackStrategy', 'retroalimentacion', 'retroalimentación']) || '',
+      },
+    };
+  }
+
+  // ── UNIDAD DIDÁCTICA ───────────────────────────────
+  if (type === 'unit') {
+    const rawUnit = pick(root, ['unit', 'unidad', 'planificacion']) || root;
+    const rawClasses = pick(rawUnit, ['classes', 'clases']) || [];
+    const classes = Array.isArray(rawClasses) ? rawClasses.map((c, i) => ({
+      number: pick(c, ['number', 'numero', 'n']) || i + 1,
+      title: pick(c, ['title', 'titulo']) || `Clase ${i + 1}`,
+      purpose: pick(c, ['purpose', 'proposito', 'propósito']) || '',
+      oaCodes: Array.isArray(pick(c, ['oaCodes', 'oa_codes', 'oas'])) ? pick(c, ['oaCodes', 'oa_codes', 'oas']) : String(pick(c, ['oaCodes', 'oa_codes', 'oas']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+      duration: normalizeDuration(pick(c, ['duration', 'duracion'])) || 45,
+      activities: normalizeActivities(pick(c, ['activities', 'actividades'])),
+      assessment: normalizeAssessment(pick(c, ['assessment', 'evaluacion', 'evaluación'])),
+    })).filter(c => c.activities.length > 0) : [];
+
+    return {
+      ...common,
+      unit: {
+        title: pick(rawUnit, ['title', 'titulo']) || 'Unidad didáctica',
+        description: pick(rawUnit, ['description', 'descripcion', 'sequence', 'secuencia']) || '',
+        numClasses: classes.length || 4,
+        classes,
+        assessment: normalizeAssessment(pick(rawUnit, ['unitAssessment', 'assessment', 'evaluacion_unidad', 'evaluacion', 'evaluación'])),
+      },
+    };
+  }
+
+  // ── MENSUAL ────────────────────────────────────────
+  if (type === 'monthly') {
+    const rawUnit = pick(root, ['unit', 'unidad', 'monthly', 'mensual']) || root;
+    const rawWeeks = pick(rawUnit, ['weeks', 'semanas']) || [];
+    const weeks = Array.isArray(rawWeeks) ? rawWeeks.map((w, i) => ({
+      number: pick(w, ['number', 'numero', 'n']) || i + 1,
+      topic: pick(w, ['topic', 'tema']) || `Semana ${i + 1}`,
+      oaCodes: Array.isArray(pick(w, ['oaCodes', 'oa_codes', 'oas'])) ? pick(w, ['oaCodes', 'oa_codes', 'oas']) : String(pick(w, ['oaCodes', 'oa_codes', 'oas']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+      duration: normalizeDuration(pick(w, ['duration', 'duracion'])) || 90,
+      activities: normalizeActivities(pick(w, ['activities', 'actividades'])),
+      assessment: normalizeAssessment(pick(w, ['assessment', 'evaluacion', 'evaluación'])),
+    })).filter(w => w.activities.length > 0) : [];
+
+    return {
+      ...common,
+      unit: {
+        title: pick(rawUnit, ['title', 'titulo']) || 'Planificación mensual',
+        description: pick(rawUnit, ['description', 'descripcion']) || '',
+        weeks,
+        assessment: normalizeAssessment(pick(rawUnit, ['assessment', 'evaluacion', 'evaluación'])),
+      },
+    };
+  }
+
+  // ── ANUAL ──────────────────────────────────────────
+  if (type === 'annual') {
+    const rawUnit = pick(root, ['unit', 'unidad', 'annual', 'anual']) || root;
+    const rawMonths = pick(rawUnit, ['months', 'meses']) || [];
+    const months = Array.isArray(rawMonths) ? rawMonths.map((m, i) => ({
+      number: pick(m, ['number', 'numero', 'n']) || i + 1,
+      name: pick(m, ['name', 'nombre', 'month', 'mes']) || `Mes ${i + 1}`,
+      topic: pick(m, ['topic', 'tema']) || '',
+      oaCodes: Array.isArray(pick(m, ['oaCodes', 'oa_codes', 'oas'])) ? pick(m, ['oaCodes', 'oa_codes', 'oas']) : String(pick(m, ['oaCodes', 'oa_codes', 'oas']) || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean),
+      notes: pick(m, ['notes', 'notas', 'description', 'descripcion']) || '',
+    })) : [];
+
+    return {
+      ...common,
+      unit: {
+        title: pick(rawUnit, ['title', 'titulo']) || 'Planificación anual',
+        description: pick(rawUnit, ['description', 'descripcion']) || '',
+        months,
+        assessment: normalizeAssessment(pick(rawUnit, ['assessment', 'evaluacion', 'evaluación'])),
+      },
+    };
+  }
+
+  // ── CLASE / MULTIGRADO (default) ───────────────────
+  return {
+    ...common,
+    activities: normalizeActivities(pick(root, ['activities', 'actividades'])),
+    assessment: normalizeAssessment(pick(root, ['assessment', 'evaluacion', 'evaluación'])),
   };
 }
 
@@ -426,9 +587,229 @@ function buildDuaPrompt(dua, framework) {
   return result;
 }
 
+// Construye la instrucción específica de tipo de planificación para el prompt.
+function buildTypeInstruction(type, context, oaDocs) {
+  const oaCodes = oaDocs.map(oa => oa.code).join(', ');
+
+  if (type === 'unit') {
+    const numClasses = Math.max(4, Math.min(8, parseInt(context.numClasses) || 6));
+    return `Eres el encargado de planificar una UNIDAD DIDACTICA completa (${numClasses} clases).
+
+Los OA de la unidad son: ${oaCodes}
+
+Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
+
+{
+  "purpose": "string - proposito de la unidad",
+  "unit": {
+    "title": "string - titulo de la unidad",
+    "description": "string - secuencia didactica general de la unidad",
+    "numClasses": ${numClasses},
+    "classes": [
+      {
+        "number": 1,
+        "title": "string - titulo de la clase",
+        "purpose": "string - proposito de la clase",
+        "oaCodes": ["codigos de OA trabajados en esta clase"],
+        "duration": number (minutos de la clase),
+        "activities": [
+          {
+            "moment": "inicio" | "desarrollo" | "cierre",
+            "title": "string",
+            "description": "string",
+            "duration": number,
+            "keyQuestions": ["string"],
+            "monitoringStrategy": "string",
+            "evidence": "string"
+          }
+        ],
+        "assessment": {
+          "type": "formativa" | "sumativa",
+          "criteria": ["string"],
+          "feedbackStrategy": "string"
+        }
+      }
+    ],
+    "unitAssessment": {
+      "type": "formativa" | "sumativa",
+      "criteria": ["string - criterios de la evaluacion final de unidad"],
+      "feedbackStrategy": "string"
+    }
+  },
+  "differentiation": "string",
+  "resources": ["string"],
+  "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
+}
+
+Debes generar EXACTAMENTE ${numClasses} clases (clases 1 a ${numClasses}), cada una con al menos 3 actividades (inicio, desarrollo, cierre). La secuencia didactica debe ser progresiva: las primeras clases construyen el conocimiento y las ultimas lo consolidan y evaluan.`;
+  }
+
+  if (type === 'monthly') {
+    const numWeeks = Math.max(3, Math.min(5, parseInt(context.numClasses) || 4));
+    return `Eres el encargado de planificar un MES de trabajo (${numWeeks} semanas).
+
+Los OA del mes son: ${oaCodes}
+
+Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
+
+{
+  "purpose": "string - proposito del mes",
+  "unit": {
+    "title": "string",
+    "description": "string - descripcion general",
+    "weeks": [
+      {
+        "number": 1,
+        "topic": "string - tema de la semana",
+        "oaCodes": ["codigos de OA de la semana"],
+        "duration": number (minutos totales de la semana, ej: 180),
+        "activities": [
+          {
+            "moment": "inicio" | "desarrollo" | "cierre",
+            "title": "string",
+            "description": "string",
+            "duration": number,
+            "keyQuestions": ["string"],
+            "monitoringStrategy": "string",
+            "evidence": "string"
+          }
+        ],
+        "assessment": {
+          "type": "formativa" | "sumativa",
+          "criteria": ["string"],
+          "feedbackStrategy": "string"
+        }
+      }
+    ],
+    "assessment": {
+      "type": "formativa" | "sumativa",
+      "criteria": ["string - criterios de la evaluacion del mes"],
+      "feedbackStrategy": "string"
+    }
+  },
+  "differentiation": "string",
+  "resources": ["string"],
+  "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
+}
+
+Debes generar EXACTAMENTE ${numWeeks} semanas, distribuyendo los OA de forma equilibrada entre ellas.`;
+  }
+
+  if (type === 'annual') {
+    const numMonths = Math.max(8, Math.min(12, parseInt(context.numClasses) || 10));
+    return `Eres el encargado de planificar el ANO escolar completo (${numMonths} meses).
+
+Los OA del ano son: ${oaCodes}
+
+Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
+
+{
+  "purpose": "string - proposito del ano",
+  "unit": {
+    "title": "string",
+    "description": "string - descripcion general de la distribucion anual",
+    "months": [
+      {
+        "number": 1,
+        "name": "string - nombre del mes (Marzo, Abril...)",
+        "topic": "string - tema o unidad del mes",
+        "oaCodes": ["codigos de OA del mes"],
+        "notes": "string - notas o consideraciones"
+      }
+    ],
+    "assessment": {
+      "type": "formativa" | "sumativa",
+      "criteria": ["string - criterios de evaluacion anual"],
+      "feedbackStrategy": "string"
+    }
+  },
+  "differentiation": "string",
+  "resources": ["string"],
+  "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
+}
+
+Genera EXACTAMENTE ${numMonths} meses (1 a ${numMonths}), distribuyendo los OA de forma progresiva y equilibrada a lo largo del ano, respetando la complejidad creciente.`;
+  }
+
+  if (type === 'evaluation') {
+    const evalType = context.evaluationType || 'formativa';
+    const instrument = context.instrument || 'prueba';
+    return `Eres el encargado de disenar una EVALUACION ${evalType.toUpperCase()} (Decreto 67).
+
+Los OA evaluados son: ${oaCodes}
+Instrumento requerido: ${instrument}
+
+Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
+
+{
+  "purpose": "string - proposito de la evaluacion",
+  "evaluation": {
+    "type": "${evalType}",
+    "instrument": ["string - instrumentos concretos (ej: prueba escrita, lista de cotejo, rubrica)"],
+    "description": "string - descripcion detallada de la evaluacion",
+    "indicators": ["string - indicadores de logro medibles"],
+    "rubric": [
+      {
+        "dimension": "string - dimension a evaluar",
+        "logrado": "string - descripcion del nivel logrado",
+        "medio": "string - descripcion del nivel medio",
+        "enDesarrollo": "string - descripcion del nivel en desarrollo"
+      }
+    ],
+    "criteria": ["string - criterios de evaluacion"],
+    "feedbackStrategy": "string - estrategia de retroalimentacion post-evaluacion"
+  },
+  "differentiation": "string",
+  "resources": ["string"],
+  "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
+}
+
+La rubrica debe tener al menos 3 dimensiones con niveles de logro claros y diferenciados. Los indicadores deben ser observables y medibles.`;
+  }
+
+  if (type === 'multigrade') {
+    const [l1, l2] = context.levels || [];
+    return `Eres el encargado de planificar una CLASE MULTIGRADO que combina dos niveles: ${l1} y ${l2}.
+
+Los OA son: ${oaCodes}
+
+Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
+
+{
+  "purpose": "string - proposito comun de la clase multigrado",
+  "activities": [
+    {
+      "moment": "inicio" | "desarrollo" | "cierre",
+      "targetLevel": "${l1}" | "${l2}",
+      "title": "string",
+      "description": "string - actividades diferenciadas para cada nivel",
+      "duration": number,
+      "keyQuestions": ["string"],
+      "monitoringStrategy": "string",
+      "evidence": "string"
+    }
+  ],
+  "assessment": {
+    "type": "formativa",
+    "criteria": ["string - criterios diferenciados por nivel"],
+    "feedbackStrategy": "string"
+  },
+  "differentiation": "string - diferenciacion para ambos niveles",
+  "resources": ["string"],
+  "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
+}
+
+Cada actividad debe indicar el nivel al que apunta (targetLevel). Alterna actividades para cada nivel y considera momentos en que ambos niveles trabajan juntos. Genera al menos 4 actividades.`;
+  }
+
+  return '';
+}
+
 function buildPlanningRecord(userId, context, oaDocs, content, aiResult, promptTemplateId) {
+  const type = PLANNING_TYPES[context.type] ? context.type : 'class';
   const planning = {
     userId,
+    type,
     title: context.title || `Clase: ${oaDocs[0]?.code || 'Sin OA'}`,
     status: 'draft',
     level: context.level,
@@ -442,8 +823,6 @@ function buildPlanningRecord(userId, context, oaDocs, content, aiResult, promptT
       source: oa.source,
     })),
     purpose: content.purpose,
-    activities: content.activities || [],
-    assessment: content.assessment || {},
     differentiation: content.differentiation || '',
     resources: content.resources || [],
     barriers: context.barriers || '',
@@ -469,6 +848,20 @@ function buildPlanningRecord(userId, context, oaDocs, content, aiResult, promptT
     updatedAt: new Date().toISOString(),
     version: 1,
   };
+
+  if (type === 'class' || type === 'multigrade') {
+    planning.activities = content.activities || [];
+    planning.assessment = content.assessment || {};
+  } else if (type === 'unit' || type === 'monthly' || type === 'annual') {
+    planning.unit = content.unit || {};
+  } else if (type === 'evaluation') {
+    planning.evaluation = content.evaluation || {};
+  }
+
+  if (type === 'multigrade' && Array.isArray(context.levels) && context.levels.length === 2) {
+    planning.levels = context.levels;
+    planning.title = planning.title || `Multigrado: ${oaDocs[0]?.code || 'Sin OA'}`;
+  }
 
   planning.warnings = runPedagogicalAudit(planning);
   return planning;
@@ -512,6 +905,13 @@ export const generatePlanning = onCall(
       throw new Error('CONTEXTO_INCOMPLETO');
     }
 
+    const type = PLANNING_TYPES[context.type] ? context.type : 'class';
+    const maxOA = PLANNING_TYPES[type].maxOA;
+
+    if (context.type === 'multigrade' && (!Array.isArray(context.levels) || context.levels.length !== 2)) {
+      throw new Error('CONTEXTO_INCOMPLETO');
+    }
+
     // 3. Obtener OA desde Firestore (no desde el prompt)
     const oaDocs = await Promise.all(
       oaIds.map(async (id) => {
@@ -524,30 +924,69 @@ export const generatePlanning = onCall(
       throw new Error('OA_NO_ENCONTRADO');
     }
 
-    // 4. Obtener plantilla de prompt (por asignatura, con fallback a general)
-    const subjectTemplate = await db
-      .collection('prompt-templates')
-      .where('status', '==', 'active')
-      .where('subjects', 'array-contains', context.subject || '')
-      .limit(1)
-      .get();
-
-    let templateDocs;
-    if (!subjectTemplate.empty) {
-      templateDocs = subjectTemplate;
-    } else {
-      templateDocs = await db
+    // 4. Obtener plantilla de prompt (por asignatura + tipo, con fallback en cascada)
+    const templateQuery = async (subject, t) => {
+      if (subject) {
+        const bySubject = await db
+          .collection('prompt-templates')
+          .where('status', '==', 'active')
+          .where('subjects', 'array-contains', subject)
+          .where('types', 'array-contains', t)
+          .limit(1)
+          .get();
+        if (!bySubject.empty) return bySubject.docs[0];
+      }
+      const byType = await db
+        .collection('prompt-templates')
+        .where('status', '==', 'active')
+        .where('types', 'array-contains', t)
+        .limit(1)
+        .get();
+      if (!byType.empty) return byType.docs[0];
+      if (subject) {
+        const bySubjectAny = await db
+          .collection('prompt-templates')
+          .where('status', '==', 'active')
+          .where('subjects', 'array-contains', subject)
+          .limit(1)
+          .get();
+        if (!bySubjectAny.empty) return bySubjectAny.docs[0];
+      }
+      const generic = await db
         .collection('prompt-templates')
         .where('status', '==', 'active')
         .limit(1)
         .get();
+      return generic.empty ? null : generic.docs[0];
+    };
+
+    let templateDoc;
+    if (type === 'class') {
+      // Retrocompatibilidad: templates sin campo types
+      const subjectTemplate = await db
+        .collection('prompt-templates')
+        .where('status', '==', 'active')
+        .where('subjects', 'array-contains', context.subject || '')
+        .limit(1)
+        .get();
+      if (!subjectTemplate.empty) {
+        templateDoc = subjectTemplate.docs[0];
+      } else {
+        templateDoc = await templateQuery(null, 'class');
+      }
+      if (!templateDoc) {
+        const generic = await db.collection('prompt-templates').where('status', '==', 'active').limit(1).get();
+        templateDoc = generic.empty ? null : generic.docs[0];
+      }
+    } else {
+      templateDoc = await templateQuery(context.subject, type);
     }
 
-    if (templateDocs.empty) {
+    if (!templateDoc) {
       throw new Error('PLANTILLA_NO_ENCONTRADA');
     }
 
-    const template = templateDocs.docs[0].data();
+    const template = templateDoc.data();
 
     // 5. Sanitizar entrada
     const sanitizedContext = {
@@ -563,9 +1002,11 @@ export const generatePlanning = onCall(
       .replace('{{subject}}', subjectHuman);
 
     const oaSummary = oaDocs
-      .slice(0, 4) // máx 4 OA por generación (control de tokens)
+      .slice(0, maxOA) // máx OA por generación según tipo
       .map(oa => `${oa.code}: ${(oa.text || '').slice(0, 250)}${(oa.text || '').length > 250 ? '...' : ''}`)
       .join('\n');
+
+    const typeInstruction = buildTypeInstruction(type, sanitizedContext, oaDocs);
 
     const userPrompt = template.user
       .replace('{{oaCode}}', oaDocs[0]?.code || '')
@@ -578,7 +1019,8 @@ export const generatePlanning = onCall(
       .replace('{{methodology}}', sanitizedContext.methodology || 'no especificado')
       .replace('{{framework}}', sanitizedContext.framework === 'estandar' ? 'Formato estandar' : 'DUA (Diseño Universal para el Aprendizaje)')
       .replace('{{barriers}}', sanitizeInput(sanitizedContext.barriers || '') || 'ninguna en particular')
-      .replace('{{dua}}', buildDuaPrompt(sanitizedContext.dua, sanitizedContext.framework));
+      .replace('{{dua}}', buildDuaPrompt(sanitizedContext.dua, sanitizedContext.framework))
+      + (typeInstruction ? `\n\n${typeInstruction}` : '');
 
     // 7. Llamar a IA (DeepSeek con fallback a Gemini)
     let aiResult;
@@ -601,8 +1043,8 @@ export const generatePlanning = onCall(
     }
 
     // 8. Normalizar y validar estructura de salida
-    const normalizedContent = normalizePlanningOutput(aiResult.content);
-    const validationErrors = validateOutputStructure(normalizedContent);
+    const normalizedContent = normalizePlanningOutput(aiResult.content, type);
+    const validationErrors = validateOutputStructure(normalizedContent, type);
     if (validationErrors.length > 0) {
       await db.collection('audit-logs').add({
         userId,
@@ -616,7 +1058,7 @@ export const generatePlanning = onCall(
     }
 
     // 9. Construir y guardar planificación
-    const planning = buildPlanningRecord(userId, sanitizedContext, oaDocs, normalizedContent, aiResult, templateDocs.docs[0].id);
+    const planning = buildPlanningRecord(userId, sanitizedContext, oaDocs, normalizedContent, aiResult, templateDoc.id);
     const docRef = await db.collection('plannings').add(planning);
 
     // 10. Registrar costo
@@ -645,6 +1087,7 @@ export const generatePlanning = onCall(
       cost: aiResult.cost,
       subject: sanitizedContext.subject,
       level: sanitizedContext.level,
+      type,
       durationMs: Date.now() - startTime,
       createdAt: new Date().toISOString(),
     });
@@ -672,15 +1115,15 @@ export const regenerateSection = onCall(
     const planning = planningDoc.data();
     if (planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
 
-    const sectionPrompt = `Genera solo la sección "${section}" para una planificación de clase.
+    const sectionPrompt = `Genera solo la sección "${section}" para una planificación de ${planning.type || 'clase'}.
 Contexto:
-- Nivel: ${planning.level}
+- Nivel: ${planning.level}${planning.levels ? ' + ' + planning.levels.join(' + ') : ''}
 - Asignatura: ${planning.subject}
-- OA: ${planning.learningObjectives?.[0]?.code} - ${planning.learningObjectives?.[0]?.text?.slice(0, 100)}
+- OA: ${planning.learningObjectives?.map(oa => `${oa.code} - ${oa.text?.slice(0, 80)}`).join(' | ')}
 - Duración: ${planning.duration} min
 - Modalidad: ${planning.modality}
 
-Sección actual: ${JSON.stringify(planning[section])}
+Sección actual: ${JSON.stringify(planning[section] ?? planning.unit?.[section.replace('unit.', '')])}
 
 Instrucciones: Genera contenido pedagógicamente sólido para esta sección. Responde SOLO con un objeto JSON.`;
 
@@ -700,6 +1143,11 @@ Instrucciones: Genera contenido pedagógicamente sólido para esta sección. Res
         assessment: ['assessment', 'evaluacion', 'evaluación'],
         differentiation: ['differentiation', 'diferenciacion', 'diferenciación'],
         resources: ['resources', 'recursos'],
+        'unit.classes': ['classes', 'clases'],
+        'unit.weeks': ['weeks', 'semanas'],
+        'unit.months': ['months', 'meses'],
+        'unit.assessment': ['assessment', 'unitAssessment', 'evaluacion', 'evaluación'],
+        evaluation: ['evaluation', 'evaluacion', 'evaluación'],
       };
 
       let newContent = rawContent;
@@ -708,21 +1156,33 @@ Instrucciones: Genera contenido pedagógicamente sólido para esta sección. Res
         if (wrapped && wrapped[key] !== undefined) { newContent = wrapped[key]; break; }
       }
 
-      if (section === 'activities' && Array.isArray(newContent)) {
+      if (section === 'unit.classes' && Array.isArray(newContent)) {
+        newContent = normalizePlanningOutput({ unit: { classes: newContent } }, 'unit').unit?.classes || newContent;
+      } else if (section === 'unit.weeks' && Array.isArray(newContent)) {
+        newContent = normalizePlanningOutput({ unit: { weeks: newContent } }, 'monthly').unit?.weeks || newContent;
+      } else if (section === 'unit.months' && Array.isArray(newContent)) {
+        newContent = normalizePlanningOutput({ unit: { months: newContent } }, 'annual').unit?.months || newContent;
+      } else if (section === 'activities' && Array.isArray(newContent)) {
         newContent = normalizePlanningOutput({ activities: newContent }).activities;
       }
-      if (section === 'assessment' && newContent && typeof newContent === 'object') {
+      if ((section === 'assessment' || section === 'unit.assessment') && newContent && typeof newContent === 'object') {
         newContent = normalizePlanningOutput({ assessment: newContent }).assessment;
+      }
+      if (section === 'evaluation' && newContent && typeof newContent === 'object') {
+        newContent = normalizePlanningOutput({ evaluation: newContent }, 'evaluation').evaluation;
       }
       if ((section === 'purpose' || section === 'differentiation') && typeof newContent === 'string') {
         newContent = newContent.replace(/^["']|["']$/g, '');
       }
 
-      await db.collection('plannings').doc(planningId).update({
-        [section]: newContent,
-        updatedAt: new Date().toISOString(),
-        version: (planning.version || 1) + 1,
-      });
+      const update = { updatedAt: new Date().toISOString(), version: (planning.version || 1) + 1 };
+      if (section.startsWith('unit.')) {
+        const key = section.replace('unit.', '');
+        update.unit = { ...(planning.unit || {}), [key]: newContent };
+      } else {
+        update[section] = newContent;
+      }
+      await db.collection('plannings').doc(planningId).update(update);
 
       return { section, content: newContent };
     } catch (error) {
@@ -811,9 +1271,12 @@ function buildDocxContent(planning, userEmail) {
 
   // Info section
   children.push(new Paragraph({ children: [new TextRun({ text: 'Informacion general', bold: true, size: 22 })], heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }));
+  const typeLabels = { class: 'Clase', unit: 'Unidad didactica', monthly: 'Mensual', annual: 'Anual', evaluation: 'Evaluacion', multigrade: 'Multigrado' };
   const infoData = [
-    ['Nivel', planning.level || '-'], ['Asignatura', planning.subject || '-'], ['Unidad', planning.unit || '-'],
-    ['Duracion', `${planning.duration || '-'} min`], ['Modalidad', planning.modality || '-'],
+    ['Tipo', typeLabels[planning.type] || 'Clase'],
+    ['Nivel', planning.levels?.length ? planning.levels.join(' + ') : (planning.level || '-')],
+    ['Asignatura', planning.subject || '-'], ['Unidad', planning.unit || '-'],
+    ['Duracion', planning.type === 'annual' ? 'Ano lectivo' : `${planning.duration || '-'} min`], ['Modalidad', planning.modality || '-'],
     ['Estudiantes', planning.studentCount || '-'], ['Metodologia', planning.methodology || '-'],
   ];
   infoData.forEach(([label, value]) => {
@@ -834,8 +1297,129 @@ function buildDocxContent(planning, userEmail) {
     children.push(new Paragraph({ children: [new TextRun({ text: planning.purpose, size: 20 })], spacing: { after: 200 } }));
   }
 
-  // Activities
-  if (planning.activities?.length > 0) {
+  // ── UNIDAD DIDÁCTICA ────────────────────────────────
+  if (planning.type === 'unit' && planning.unit) {
+    const unit = planning.unit;
+    if (unit.title) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Unidad: ' + unit.title, bold: true, size: 22 })], heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }));
+    }
+    if (unit.description) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Secuencia didactica', bold: true, size: 20 })], spacing: { before: 200, after: 40 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: unit.description, size: 20 })], spacing: { after: 120 } }));
+    }
+    (unit.classes || []).forEach((clase) => {
+      children.push(new Paragraph({ children: [new TextRun({ text: `Clase ${clase.number}: ${clase.title}`, bold: true, size: 20, color: '2563eb' })], spacing: { before: 250, after: 60 } }));
+      if (clase.purpose) children.push(new Paragraph({ children: [new TextRun({ text: clase.purpose, size: 20 })], spacing: { after: 40 } }));
+      if (clase.oaCodes?.length) children.push(new Paragraph({ children: [new TextRun({ text: `OA: ${clase.oaCodes.join(', ')}`, size: 18, color: '666666' })], spacing: { after: 40 } }));
+      const moments = { inicio: 'Inicio', desarrollo: 'Desarrollo', cierre: 'Cierre' };
+      ['inicio', 'desarrollo', 'cierre'].forEach(moment => {
+        const acts = (clase.activities || []).filter(a => a.moment === moment);
+        if (acts.length === 0) return;
+        children.push(new Paragraph({ children: [new TextRun({ text: moments[moment], bold: true, size: 18, color: '2563eb' })], spacing: { before: 100, after: 40 } }));
+        acts.forEach((act, i) => {
+          children.push(new Paragraph({ children: [new TextRun({ text: `${i + 1}. ${act.title || act.description || 'Actividad'} (${act.duration || '-'} min)`, bold: true, size: 18 })], spacing: { before: 60, after: 20 } }));
+          if (act.description && act.description !== act.title) {
+            children.push(new Paragraph({ children: [new TextRun({ text: act.description, size: 18 })], spacing: { after: 20 } }));
+          }
+          if (act.evidence) children.push(new Paragraph({ children: [new TextRun({ text: `Evidencia: ${act.evidence}`, size: 16, color: '666666' })], spacing: { after: 40 } }));
+        });
+      });
+      if (clase.assessment?.criteria?.length) {
+        children.push(new Paragraph({ children: [new TextRun({ text: `Criterios clase: ${clase.assessment.criteria.join('; ')}`, size: 16, color: '666666' })], spacing: { after: 40 } }));
+      }
+    });
+    if (unit.assessment) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Evaluacion de unidad', bold: true, size: 20 })], spacing: { before: 250, after: 60 } }));
+      if (unit.assessment.type) children.push(new Paragraph({ children: [new TextRun({ text: `Tipo: ${unit.assessment.type}`, size: 18 })], spacing: { after: 40 } }));
+      if (unit.assessment.criteria?.length) {
+        unit.assessment.criteria.forEach(c => children.push(new Paragraph({ children: [new TextRun({ text: `- ${c}`, size: 18 })], spacing: { after: 40 } })));
+      }
+      if (unit.assessment.feedbackStrategy) children.push(new Paragraph({ children: [new TextRun({ text: `Retroalimentacion: ${unit.assessment.feedbackStrategy}`, size: 18 })], spacing: { after: 200 } }));
+    }
+  }
+
+  // ── MENSUAL ─────────────────────────────────────────
+  if (planning.type === 'monthly' && planning.unit) {
+    const unit = planning.unit;
+    if (unit.description) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Descripcion general', bold: true, size: 20 })], spacing: { before: 200, after: 40 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: unit.description, size: 20 })], spacing: { after: 120 } }));
+    }
+    (unit.weeks || []).forEach((semana) => {
+      children.push(new Paragraph({ children: [new TextRun({ text: `Semana ${semana.number}: ${semana.topic}`, bold: true, size: 20, color: '2563eb' })], spacing: { before: 250, after: 60 } }));
+      if (semana.oaCodes?.length) children.push(new Paragraph({ children: [new TextRun({ text: `OA: ${semana.oaCodes.join(', ')}`, size: 18, color: '666666' })], spacing: { after: 40 } }));
+      (semana.activities || []).forEach((act, i) => {
+        children.push(new Paragraph({ children: [new TextRun({ text: `${i + 1}. ${act.title || act.description || 'Actividad'} (${act.duration || '-'} min)`, bold: true, size: 18 })], spacing: { before: 60, after: 20 } }));
+        if (act.description && act.description !== act.title) {
+          children.push(new Paragraph({ children: [new TextRun({ text: act.description, size: 18 })], spacing: { after: 20 } }));
+        }
+      });
+      if (semana.assessment?.criteria?.length) {
+        children.push(new Paragraph({ children: [new TextRun({ text: `Criterios semana: ${semana.assessment.criteria.join('; ')}`, size: 16, color: '666666' })], spacing: { after: 40 } }));
+      }
+    });
+    if (unit.assessment) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Evaluacion del mes', bold: true, size: 20 })], spacing: { before: 250, after: 60 } }));
+      if (unit.assessment.criteria?.length) {
+        unit.assessment.criteria.forEach(c => children.push(new Paragraph({ children: [new TextRun({ text: `- ${c}`, size: 18 })], spacing: { after: 40 } })));
+      }
+      if (unit.assessment.feedbackStrategy) children.push(new Paragraph({ children: [new TextRun({ text: `Retroalimentacion: ${unit.assessment.feedbackStrategy}`, size: 18 })], spacing: { after: 200 } }));
+    }
+  }
+
+  // ── ANUAL ──────────────────────────────────────────
+  if (planning.type === 'annual' && planning.unit) {
+    const unit = planning.unit;
+    if (unit.description) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Distribucion anual', bold: true, size: 20 })], spacing: { before: 200, after: 40 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: unit.description, size: 20 })], spacing: { after: 120 } }));
+    }
+    (unit.months || []).forEach((mes) => {
+      children.push(new Paragraph({ children: [new TextRun({ text: `Mes ${mes.number}: ${mes.name || ''}`, bold: true, size: 18, color: '2563eb' })], spacing: { before: 120, after: 40 } }));
+      if (mes.topic) children.push(new Paragraph({ children: [new TextRun({ text: `Tema: ${mes.topic}`, size: 18 })], spacing: { after: 20 } }));
+      if (mes.oaCodes?.length) children.push(new Paragraph({ children: [new TextRun({ text: `OA: ${mes.oaCodes.join(', ')}`, size: 16, color: '666666' })], spacing: { after: 20 } }));
+      if (mes.notes) children.push(new Paragraph({ children: [new TextRun({ text: mes.notes, size: 16, color: '666666' })], spacing: { after: 40 } }));
+    });
+    if (unit.assessment) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Evaluacion anual', bold: true, size: 20 })], spacing: { before: 250, after: 60 } }));
+      if (unit.assessment.criteria?.length) {
+        unit.assessment.criteria.forEach(c => children.push(new Paragraph({ children: [new TextRun({ text: `- ${c}`, size: 18 })], spacing: { after: 40 } })));
+      }
+      if (unit.assessment.feedbackStrategy) children.push(new Paragraph({ children: [new TextRun({ text: `Retroalimentacion: ${unit.assessment.feedbackStrategy}`, size: 18 })], spacing: { after: 200 } }));
+    }
+  }
+
+  // ── EVALUACIÓN STANDALONE ──────────────────────────
+  if (planning.type === 'evaluation' && planning.evaluation) {
+    const ev = planning.evaluation;
+    children.push(new Paragraph({ children: [new TextRun({ text: 'Evaluacion', bold: true, size: 22 })], heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }));
+    children.push(new Paragraph({ children: [new TextRun({ text: `Tipo: ${ev.type || '-'}`, size: 20 })], spacing: { after: 40 } }));
+    if (ev.instrument?.length) children.push(new Paragraph({ children: [new TextRun({ text: `Instrumento: ${ev.instrument.join(', ')}`, size: 20 })], spacing: { after: 60 } }));
+    if (ev.description) children.push(new Paragraph({ children: [new TextRun({ text: ev.description, size: 20 })], spacing: { after: 120 } }));
+    if (ev.indicators?.length) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Indicadores de logro:', bold: true, size: 20 })], spacing: { after: 40 } }));
+      ev.indicators.forEach(ind => children.push(new Paragraph({ children: [new TextRun({ text: `- ${ind}`, size: 20 })], spacing: { after: 40 } })));
+    }
+    if (ev.rubric?.length) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Rubrica', bold: true, size: 20 })], spacing: { before: 200, after: 60 } }));
+      ev.rubric.forEach(dim => {
+        children.push(new Paragraph({ children: [new TextRun({ text: `Dimension: ${dim.dimension || dim.name || '-'}`, bold: true, size: 18, color: '2563eb' })], spacing: { before: 100, after: 40 } }));
+        children.push(new Paragraph({ children: [new TextRun({ text: `Logrado: ${dim.logrado || '-'}`, size: 16 })], spacing: { after: 20 } }));
+        children.push(new Paragraph({ children: [new TextRun({ text: `Medio: ${dim.medio || '-'}`, size: 16 })], spacing: { after: 20 } }));
+        children.push(new Paragraph({ children: [new TextRun({ text: `En desarrollo: ${dim.enDesarrollo || '-'}`, size: 16 })], spacing: { after: 40 } }));
+      });
+    }
+    if (ev.criteria?.length) {
+      children.push(new Paragraph({ children: [new TextRun({ text: 'Criterios:', bold: true, size: 20 })], spacing: { before: 100, after: 40 } }));
+      ev.criteria.forEach(c => children.push(new Paragraph({ children: [new TextRun({ text: `- ${c}`, size: 20 })], spacing: { after: 40 } })));
+    }
+    if (ev.feedbackStrategy) {
+      children.push(new Paragraph({ children: [new TextRun({ text: `Retroalimentacion: ${ev.feedbackStrategy}`, size: 20 })], spacing: { after: 200 } }));
+    }
+  }
+
+  // Activities (clase y multigrado)
+  if ((planning.type === 'class' || planning.type === 'multigrade') && planning.activities?.length > 0) {
     children.push(new Paragraph({ children: [new TextRun({ text: 'Actividades', bold: true, size: 22 })], heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }));
     const moments = { inicio: 'Inicio', desarrollo: 'Desarrollo', cierre: 'Cierre' };
     ['inicio', 'desarrollo', 'cierre'].forEach(moment => {
@@ -847,6 +1431,9 @@ function buildDocxContent(planning, userEmail) {
         if (act.description && act.description !== act.title) {
           children.push(new Paragraph({ children: [new TextRun({ text: act.description, size: 20 })], spacing: { after: 40 } }));
         }
+        if (act.targetLevel) {
+          children.push(new Paragraph({ children: [new TextRun({ text: `Nivel: ${act.targetLevel}`, size: 16, color: '2563eb' })], spacing: { after: 40 } }));
+        }
         if (act.keyQuestions?.length > 0) {
           children.push(new Paragraph({ children: [new TextRun({ text: `Pregunta clave: ${act.keyQuestions[0]}`, italics: true, size: 18, color: '666666' })], spacing: { after: 40 } }));
         }
@@ -857,8 +1444,8 @@ function buildDocxContent(planning, userEmail) {
     });
   }
 
-  // Assessment
-  if (planning.assessment) {
+  // Assessment (clase y multigrado)
+  if ((planning.type === 'class' || planning.type === 'multigrade') && planning.assessment) {
     children.push(new Paragraph({ children: [new TextRun({ text: 'Evaluacion', bold: true, size: 22 })], heading: HeadingLevel.HEADING_2, spacing: { before: 300, after: 100 } }));
     const ass = planning.assessment;
     children.push(new Paragraph({ children: [new TextRun({ text: `Tipo: ${ass.type || '-'}`, size: 20 })], spacing: { after: 60 } }));

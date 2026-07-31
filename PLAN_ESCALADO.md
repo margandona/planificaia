@@ -26,7 +26,7 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 |------|--------|-----------|--------|----------|
 | S-0 | Consolidación y habilitadores | Alta | ✅ COMPLETADA | 2 sem |
 | S-1 | Cobertura curricular completa | Alta | ✅ COMPLETADA | 4 sem |
-| S-2 | Tipos de planificación extendidos | Alta | ⏳ PENDIENTE | 4 sem |
+| S-2 | Tipos de planificación extendidos | Alta | 🔨 EN CURSO | 4 sem |
 | S-3 | Colaboración e institucional | Media | ⏳ PENDIENTE | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ⏳ PENDIENTE | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ⏳ PENDIENTE | 3 sem |
@@ -91,6 +91,14 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 **Impacto en IA:** la plantilla debe adaptarse por tipo; nueva dimensión `type` en `plannings` y en `prompt-templates`.
 
 **Criterio de salida:** wizard con selector de tipo de planificación, editor soporta estructura por unidad.
+
+**Avance (2026-07-31):** implementación completa en backend + frontend:
+- **Backend** (`functions/index.js`): constante `PLANNING_TYPES` (`class` maxOA 4, `unit` 8, `monthly` 10, `annual` 12, `evaluation` 4, `multigrade` 6). Reglas de validación V-001/V-004/V-006/V-007/V-009 tipo-conscientes; `validateOutputStructure(data, type)` y `normalizePlanningOutput(data, type)` con ramas por tipo (unit→`numClasses` 4-8, monthly→semanas 3-5, annual→meses 8-12, evaluation→`evalType`+instrumento, multigrade→`levels` con `targetLevel` por actividad); `buildPlanningRecord` asigna `activities`/`assessment` (class|multigrade), `unit` (unit|monthly|annual) o `evaluation`; `regenerateSection` con sectionMap `unit.classes/weeks/months/assessment` y `evaluation`; `buildDocxContent` renderiza secciones por tipo; `buildTypeInstruction` inyecta el schema JSON de cada tipo en el prompt.
+- **Templates IA**: `prompt-templates` ahora con campo `types` (`['class']` en las 6 existentes); 5 templates nuevos en Firestore (unit `fTaumKDnnAMA2YZKGLyO`, monthly `KZmEv2Ht1LhkBF5XZ2GG`, annual `jIkaTteFlejYgtMYOYGf`, evaluation `9MMUwN2N9CozUCzWMD8r`, multigrade `mKTDRIPxE7v76LhsuTkn`); selección en cascada `subject+type → type → subject → generic` (clase conserva path retrocompat).
+- **Wizard** (`public/js/app.js`): step 1 con selector de 6 tipos; step 2 con nivel 2 para multigrado; step 3 campos por tipo (num clases/semanas/meses, tipo+instrumento de evaluación); step 5/6/8 paneles por tipo; `generate` envía `type/level2/levels/numClasses/evaluationType/instrument`; límites de OA por tipo (class 4, unit 8, monthly 10, annual 12, evaluation 4, multigrade 6).
+- **Editor manual**: selector de tipo, nivel 2 multigrado, editor de estructura por unidad (clases/semanas/meses con actividades, OA y evaluación por ítem) y editor de evaluación (indicadores, rúbrica, instrumentos, Decreto 67).
+- **Detalle/dashboard**: badges de tipo y niveles multigrado; render de unidades (clases/semanas/meses), evaluación y actividades por tipo.
+- **Tests**: 48/48 unitarios (validación por tipo, instrucciones de tipo, V-006 por tipo, records multigrado/evaluación/unidad); seed de templates idempotente (`scripts/seed-prompt-templates.mjs`).
 
 ---
 
