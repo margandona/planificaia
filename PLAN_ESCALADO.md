@@ -69,6 +69,8 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 
 **Estado (2026-07-31):** asignaturas de básica/media ingeridas (10 asignaturas × 12 niveles + filosofía/Ed. ciudadana en 3°-4° FG) = **1,434 OA** (2,359 docs totales con habilidades/actitudes). Scraper idempotente (IDs determinísticos). Niveles 1°-4° básico añadidos al wizard y catálogo Firestore (`catalog/subjects` v2, 12 asignaturas). Religión excluida (el portal no estructura sus OA; marco propio por confesión). EPJA no parsea por HTML directo (contenido vía buscador/search-api) — pendiente.
 
+**Actualización (Parvularia + OAT):** **Parvularia** ingerida (3 ámbitos × 3 niveles = 206 OA, códigos tipo "OA 01 LV NT", ejes = núcleos `ncleo-`). **OAT** ingeridos desde las landings de nivel (62: 32 en 1°-6° y 30 en 7°-2°, `type: 'oat'`, `subject: 'transversal'`, dimensiones oficiales). Totales Firestore: **2,627 docs = 1,640 OA + 327 habilidades + 598 actitudes + 62 OAT**. Wizard y catálogo ampliados a 15 asignaturas (`catalog/subjects` v3). OAT de 3°-4° medio solo existen en el PDF de Bases Curriculares (no hay HTML en el portal) — pendiente opcional.
+
 ---
 
 ### Fase S-2 — Tipos de planificación extendidos

@@ -27,6 +27,9 @@ getAnalytics(fb);
 
 // Asignaturas por defecto (fallback si el catálogo remoto no está disponible)
 const DEFAULT_SUBJECTS = [
+  { key: 'desarrollo-personal-social', name: 'Desarrollo Personal y Social', icon: '🧒', active: true },
+  { key: 'comunicacion-integral', name: 'Comunicación Integral', icon: '🗣️', active: true },
+  { key: 'interaccion-comprension-entorno', name: 'Interacción y Comprensión del Entorno', icon: '🌱', active: true },
   { key: 'historia-geografia-ciencias-sociales', name: 'Historia, Geografía y Cs. Sociales', icon: '🏛️', active: true },
   { key: 'lenguaje-y-comunicacion', name: 'Lenguaje y Comunicación', icon: '📖', active: true },
   { key: 'matematica', name: 'Matemática', icon: '🔢', active: true },
@@ -57,9 +60,12 @@ const approvePlanningFn = httpsCallable(fx, 'approvePlanning');
 const exportPlanningFn = httpsCallable(fx, 'exportPlanning');
 const submitFeedbackFn = httpsCallable(fx, 'submitFeedback');
 
-// ──────────── Catálogo curricular (1° básico → 4° medio) ────────────
+// ──────────── Catálogo curricular (Parvularia → 4° medio) ────────────
 
 const LEVELS = [
+  ['sc-sala-cuna', 'Sala Cuna'],
+  ['nm-nivel-medio', 'Nivel Medio'],
+  ['nt-nivel-transicion', 'Nivel Transición'],
   ['1-basico', '1° básico'],
   ['2-basico', '2° básico'],
   ['3-basico', '3° básico'],
