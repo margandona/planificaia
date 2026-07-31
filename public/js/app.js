@@ -42,6 +42,10 @@ const DEFAULT_SUBJECTS = [
   { key: 'orientacion', name: 'Orientación', icon: '🧭', active: true },
   { key: 'filosofia', name: 'Filosofía', icon: '🧠', active: true },
   { key: 'educacion-ciudadana', name: 'Educación Ciudadana', icon: '🗳️', active: true },
+  { key: 'emprendimiento-y-empleabilidad', name: 'Emprendimiento y Empleabilidad', icon: '💡', active: true },
+  { key: 'educacion-financiera', name: 'Educación Financiera', icon: '💰', active: true },
+  { key: 'responsabilidad-personal-social', name: 'Responsabilidad Personal y Social', icon: '🤝', active: true },
+  { key: 'pensamiento-computacional', name: 'Pensamiento Computacional', icon: '🤖', active: true },
 ];
 
 const store = reactive({
@@ -78,6 +82,12 @@ const LEVELS = [
   ['2-medio', '2° medio'],
   ['3-medio', '3° medio'],
   ['4-medio', '4° medio'],
+  ['epja-n1-eb', 'EPJA Nivel 1 Básica'],
+  ['epja-n2-eb', 'EPJA Nivel 2 Básica'],
+  ['epja-n3-eb', 'EPJA Nivel 3 Básica'],
+  ['epja-n1-em', 'EPJA Nivel 1 Media'],
+  ['epja-n2-em', 'EPJA Nivel 2 Media'],
+  ['epja-n1-n2-em', 'EPJA Nivel 1 y 2 Media'],
 ];
 
 const LEVELS_BASICA = LEVELS.filter(([v]) => v.includes('basico'));

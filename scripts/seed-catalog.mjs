@@ -27,8 +27,12 @@ const CATALOG = {
     { key: 'orientacion', name: 'Orientación', icon: '🧭', sort: 13, active: true },
     { key: 'filosofia', name: 'Filosofía', icon: '🧠', sort: 14, active: true },
     { key: 'educacion-ciudadana', name: 'Educación Ciudadana', icon: '🗳️', sort: 15, active: true },
+    { key: 'emprendimiento-y-empleabilidad', name: 'Emprendimiento y Empleabilidad', icon: '💡', sort: 16, active: true },
+    { key: 'educacion-financiera', name: 'Educación Financiera', icon: '💰', sort: 17, active: true },
+    { key: 'responsabilidad-personal-social', name: 'Responsabilidad Personal y Social', icon: '🤝', sort: 18, active: true },
+    { key: 'pensamiento-computacional', name: 'Pensamiento Computacional', icon: '🤖', sort: 19, active: true },
   ],
-  version: 3,
+  version: 4,
   updatedAt: new Date().toISOString(),
 };
 
