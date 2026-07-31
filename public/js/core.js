@@ -1,0 +1,304 @@
+export { createApp } from 'vue';
+export { ref } from 'vue';
+export { reactive } from 'vue';
+export { computed } from 'vue';
+export { onMounted } from 'vue';
+export { defineComponent } from 'vue';
+export { h } from 'vue';
+export { markRaw } from 'vue';
+export { shallowRef } from 'vue';
+export { createUserWithEmailAndPassword } from 'firebase/auth';
+export { signInWithEmailAndPassword } from 'firebase/auth';
+export { signOut } from 'firebase/auth';
+export { sendPasswordResetEmail } from 'firebase/auth';
+export { sendEmailVerification } from 'firebase/auth';
+export { updateProfile } from 'firebase/auth';
+export { onAuthStateChanged } from 'firebase/auth';
+export { getIdTokenResult } from 'firebase/auth';
+export { collection } from 'firebase/firestore';
+export { query } from 'firebase/firestore';
+export { where } from 'firebase/firestore';
+export { orderBy } from 'firebase/firestore';
+export { getDocs } from 'firebase/firestore';
+export { doc } from 'firebase/firestore';
+export { getDoc } from 'firebase/firestore';
+export { setDoc } from 'firebase/firestore';
+export { addDoc } from 'firebase/firestore';
+export { updateDoc } from 'firebase/firestore';
+export { deleteDoc } from 'firebase/firestore';
+export { limit } from 'firebase/firestore';
+export { serverTimestamp } from 'firebase/firestore';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef } from 'vue';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getAnalytics } from 'firebase/analytics';
+import { getPerformance, trace } from 'firebase/performance';
+import { getIdTokenResult } from 'firebase/auth';
+
+// ──────────── Firebase ────────────
+
+const firebaseConfig = {
+  apiKey: "AIzaSyADeo8Y7lVBeT4MJNXOqQSbirOa6sdX3EY",
+  authDomain: "planificacion-con-ia.firebaseapp.com",
+  projectId: "planificacion-con-ia",
+  storageBucket: "planificacion-con-ia.firebasestorage.app",
+  messagingSenderId: "317744047775",
+  appId: "1:317744047775:web:c7779e496403a6e64ae4aa",
+  measurementId: "G-TFHV3R6JT0"
+};
+
+const fb = initializeApp(firebaseConfig);
+const auth = getAuth(fb);
+const db = getFirestore(fb);
+const fx = getFunctions(fb, 'us-central1');
+getAnalytics(fb);
+let perf = null;
+try { perf = getPerformance(fb); } catch (e) { /* Performance no disponible en dev */ }
+
+// ──────────── Observabilidad (S-5) ────────────
+
+// Trace de Performance Monitoring web (sustituto pragmático de Crashlytics,
+// que solo existe para iOS/Android). Crashlytics → Error Reporting web.
+const perfTrace = (name) => { try { return perf ? trace(perf, name) : null; } catch (e) { return null; } };
+
+// Handler global de errores → Cloud Logging (console.error) + colección error-logs.
+async function reportError(action, context = {}, err = null) {
+  const entry = {
+    action,
+    url: window.location.hash || '/',
+    userId: store.user?.uid || null,
+    message: err?.message || context.message || '',
+    code: err?.code || context.code || null,
+    stack: err?.stack?.slice(0, 2000) || null,
+    createdAt: new Date().toISOString(),
+  };
+  try { console.error('[PlanificaIA]', action, context, err || ''); } catch (e) { /* ignore */ }
+  try {
+    await addDoc(collection(db, 'error-logs'), entry);
+  } catch (e) { /* Firestore write fallible; ya se logueó en consola */ }
+}
+
+window.addEventListener('error', (ev) => {
+  reportError('global_error', { message: ev.message, code: 'window_error' }, ev.error);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  reportError('unhandled_rejection', { message: (ev.reason?.message || String(ev.reason)) }, ev.reason);
+});
+
+// ──────────── Estado global ────────────
+
+// Asignaturas por defecto (fallback si el catálogo remoto no está disponible)
+const DEFAULT_SUBJECTS = [
+  { key: 'desarrollo-personal-social', name: 'Desarrollo Personal y Social', icon: '🧒', active: true },
+  { key: 'comunicacion-integral', name: 'Comunicación Integral', icon: '🗣️', active: true },
+  { key: 'interaccion-comprension-entorno', name: 'Interacción y Comprensión del Entorno', icon: '🌱', active: true },
+  { key: 'historia-geografia-ciencias-sociales', name: 'Historia, Geografía y Cs. Sociales', icon: '🏛️', active: true },
+  { key: 'lenguaje-y-comunicacion', name: 'Lenguaje y Comunicación', icon: '📖', active: true },
+  { key: 'matematica', name: 'Matemática', icon: '🔢', active: true },
+  { key: 'ciencias-naturales', name: 'Ciencias Naturales', icon: '🔬', active: true },
+  { key: 'ingles', name: 'Inglés', icon: '🌎', active: true },
+  { key: 'artes-visuales', name: 'Artes Visuales', icon: '🎨', active: true },
+  { key: 'musica', name: 'Música', icon: '🎵', active: true },
+  { key: 'educacion-fisica-salud', name: 'Educación Física y Salud', icon: '⚽', active: true },
+  { key: 'tecnologia', name: 'Tecnología', icon: '💻', active: true },
+  { key: 'orientacion', name: 'Orientación', icon: '🧭', active: true },
+  { key: 'filosofia', name: 'Filosofía', icon: '🧠', active: true },
+  { key: 'educacion-ciudadana', name: 'Educación Ciudadana', icon: '🗳️', active: true },
+  { key: 'emprendimiento-y-empleabilidad', name: 'Emprendimiento y Empleabilidad', icon: '💡', active: true },
+  { key: 'educacion-financiera', name: 'Educación Financiera', icon: '💰', active: true },
+  { key: 'responsabilidad-personal-social', name: 'Responsabilidad Personal y Social', icon: '🤝', active: true },
+  { key: 'pensamiento-computacional', name: 'Pensamiento Computacional', icon: '🤖', active: true },
+];
+
+const store = reactive({
+  user: null,
+  profile: null,
+  claims: null,
+  org: null,
+  orgRole: null,
+  ready: false,
+  plannings: [],
+  loading: false,
+  error: null,
+  subjects: DEFAULT_SUBJECTS, // catálogo dinámico desde Firestore (fallback a defaults)
+});
+
+const generatePlanningFn = httpsCallable(fx, 'generatePlanning');
+const regenerateSectionFn = httpsCallable(fx, 'regenerateSection');
+const approvePlanningFn = httpsCallable(fx, 'approvePlanning');
+const exportPlanningFn = httpsCallable(fx, 'exportPlanning');
+const submitFeedbackFn = httpsCallable(fx, 'submitFeedback');
+const setUserRoleFn = httpsCallable(fx, 'setUserRole');
+const createOrganizationFn = httpsCallable(fx, 'createOrganization');
+const inviteMemberFn = httpsCallable(fx, 'inviteMember');
+const acceptInviteFn = httpsCallable(fx, 'acceptInvite');
+const removeMemberFn = httpsCallable(fx, 'removeMember');
+
+const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
+const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
+
+// ──────────── Catálogo curricular (Parvularia → 4° medio) ────────────
+
+const LEVELS = [
+  ['sc-sala-cuna', 'Sala Cuna'],
+  ['nm-nivel-medio', 'Nivel Medio'],
+  ['nt-nivel-transicion', 'Nivel Transición'],
+  ['1-basico', '1° básico'],
+  ['2-basico', '2° básico'],
+  ['3-basico', '3° básico'],
+  ['4-basico', '4° básico'],
+  ['5-basico', '5° básico'],
+  ['6-basico', '6° básico'],
+  ['7-basico', '7° básico'],
+  ['8-basico', '8° básico'],
+  ['1-medio', '1° medio'],
+  ['2-medio', '2° medio'],
+  ['3-medio', '3° medio'],
+  ['4-medio', '4° medio'],
+  ['epja-n1-eb', 'EPJA Nivel 1 Básica'],
+  ['epja-n2-eb', 'EPJA Nivel 2 Básica'],
+  ['epja-n3-eb', 'EPJA Nivel 3 Básica'],
+  ['epja-n1-em', 'EPJA Nivel 1 Media'],
+  ['epja-n2-em', 'EPJA Nivel 2 Media'],
+  ['epja-n1-n2-em', 'EPJA Nivel 1 y 2 Media'],
+];
+
+const LEVELS_BASICA = LEVELS.filter(([v]) => v.includes('basico'));
+const LEVELS_MEDIA = LEVELS.filter(([v]) => v.includes('medio'));
+
+const levelLabel = (v) => (LEVELS.find(([lv]) => lv === v) || [v, v])[1];
+const subjectLabel = (v) => (store.subjects.find((s) => s.key === v)?.name || v);
+const activeSubjects = () => store.subjects.filter(s => s.active !== false);
+
+// Carga el catálogo de asignaturas desde Firestore (con caché y fallback)
+async function loadSubjectCatalog() {
+  const cacheKey = 'catalog_subjects_v1';
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.expires > Date.now() && parsed.subjects?.length) {
+        store.subjects = parsed.subjects;
+        return;
+      }
+    }
+    const snap = await getDoc(doc(db, 'catalog', 'subjects'));
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.subjects) && data.subjects.length) {
+        store.subjects = data.subjects;
+        try { localStorage.setItem(cacheKey, JSON.stringify({ subjects: data.subjects, expires: Date.now() + 7 * 24 * 60 * 60 * 1000 })); } catch (e) {}
+      }
+    }
+  } catch (e) {
+    console.warn('Catálogo remoto no disponible, usando defaults:', e);
+  }
+}
+
+// ──────────── Helpers ────────────
+
+function go(route) { window.location.hash = '#' + route; }
+
+function guard() {
+  if (!store.user) { go('/login'); return false; }
+  if (!store.user.emailVerified) { go('/verificar-email'); return false; }
+  return true;
+}
+
+function redirectAuth() {
+  if (store.user && store.user.emailVerified) { go('/dashboard'); return true; }
+  return false;
+}
+
+function mapError(code) {
+  const map = {
+    'auth/invalid-credential': 'Correo o contraseña incorrectos',
+    'auth/invalid-email': 'Correo inválido',
+    'auth/user-disabled': 'Cuenta deshabilitada',
+    'auth/user-not-found': 'No existe cuenta con este correo',
+    'auth/wrong-password': 'Contraseña incorrecta',
+    'auth/too-many-requests': 'Demasiados intentos. Espera unos minutos.',
+    'auth/email-already-in-use': 'Este correo ya está registrado',
+    'auth/weak-password': 'Contraseña demasiado débil',
+  };
+  return map[code] || 'Error inesperado. Intenta de nuevo.';
+}
+
+// ──────────── Componentes UI reutilizables ────────────
+
+const Spinner = (size = 5) => h('svg', {
+  class: `animate-spin h-${size} w-${size} text-blue-600`,
+  viewBox: '0 0 24 24', 'aria-hidden': 'true',
+}, [
+  h('circle', { class: 'opacity-25', cx: '12', cy: '12', r: '10', stroke: 'currentColor', 'stroke-width': '4', fill: 'none' }),
+  h('path', { class: 'opacity-75', fill: 'currentColor', d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z' }),
+]);
+
+const Alert = (type, msg) => {
+  if (!msg) return null;
+  const colors = { error: 'bg-red-50 border-red-200 text-red-700', success: 'bg-green-50 border-green-200 text-green-700', warning: 'bg-amber-50 border-amber-200 text-amber-700', info: 'bg-blue-50 border-blue-200 text-blue-700' };
+  return h('div', { class: `${colors[type] || colors.info} border p-3 rounded-lg mb-4 text-sm flex items-center gap-2`, role: 'alert' }, [h('span', type === 'error' ? '⚠' : type === 'success' ? '✓' : 'ℹ'), msg]);
+};
+
+const EmptyState = (icon, title, desc, action) => h('div', { class: 'text-center py-16' }, [
+  h('div', { class: 'text-5xl mb-4' }, icon),
+  h('h3', { class: 'text-lg font-semibold text-slate-700 mb-1' }, title),
+  h('p', { class: 'text-sm text-slate-400 mb-4' }, desc),
+  action || null,
+]);
+
+const PageTitle = (title, subtitle) => h('div', { class: 'mb-6' }, [
+  h('h1', { class: 'text-2xl font-bold text-slate-900' }, title),
+  subtitle ? h('p', { class: 'text-sm text-slate-500 mt-1' }, subtitle) : null,
+]);
+
+const Card = (children, extra = '') => h('div', { class: `bg-white rounded-xl shadow-sm border border-slate-200 ${extra}` }, children);
+
+// ──────────── Layout ────────────
+
+const Layout = defineComponent({
+  props: ['title', 'subtitle', 'noWrapper'],
+  setup(props, { slots }) {
+    const logout = async () => { await signOut(auth); store.user = null; store.profile = null; store.org = null; store.orgRole = null; store.claims = null; go('/'); };
+
+    return () => h('div', { class: 'min-h-screen flex flex-col' }, [
+      // Navbar
+      h('nav', { class: 'bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50', role: 'navigation', 'aria-label': 'Navegación principal' }, [
+        h('div', { class: 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14' }, [
+          h('a', { href: '#/', class: 'flex items-center gap-2 font-bold text-lg text-blue-600 no-underline hover:text-blue-700', 'aria-label': 'PlanificaIA - Inicio' }, [
+            h('span', { 'aria-hidden': 'true', class: 'text-xl' }, '📋'),
+            'PlanificaIA',
+          ]),
+          h('div', { class: 'flex items-center gap-3' }, !store.user ? [
+            h('a', { href: '#/login', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Iniciar sesión'),
+            h('a', { href: '#/registro', class: 'bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition' }, 'Registrarse'),
+          ] : [
+            !store.user.emailVerified ? h('span', { class: 'inline-block w-2 h-2 bg-amber-400 rounded-full', title: 'Correo no verificado' }) : null,
+            h('a', { href: '#/dashboard', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Dashboard'),
+            (store.org || isAdmin()) ? h('a', { href: '#/institucional', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Institucional') : null,
+            h('a', { href: '#/perfil', class: 'text-sm text-slate-600 hover:text-slate-900' }, store.user.displayName || store.user.email),
+            h('button', { onClick: logout, class: 'text-sm text-red-600 hover:text-red-700' }, 'Salir'),
+          ]),
+        ]),
+      ]),
+      // Main content
+      h('main', { class: 'flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full', role: 'main' }, [
+        props.title ? PageTitle(props.title, props.subtitle) : null,
+        slots.default ? slots.default() : null,
+      ]),
+      // Footer
+      h('footer', { class: 'bg-white border-t border-slate-200 mt-auto py-6', role: 'contentinfo' }, [
+        h('div', { class: 'max-w-7xl mx-auto px-4 text-center text-xs text-slate-400 space-x-4' }, [
+          h('span', '© 2026 PlanificaIA — MaKuaZ'),
+          h('a', { href: '#/privacidad', class: 'hover:text-slate-600 underline' }, 'Privacidad'),
+          h('a', { href: '#/terminos', class: 'hover:text-slate-600 underline' }, 'Términos'),
+        ]),
+      ]),
+    ]);
+  }
+});
+
+// Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
+export { DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin };

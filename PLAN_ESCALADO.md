@@ -29,7 +29,7 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | S-2 | Tipos de planificación extendidos | Alta | ✅ COMPLETADA | 4 sem |
 | S-3 | Colaboración e institucional | Media | ✅ COMPLETADA | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ✅ COMPLETADA | 4 sem |
-| S-5 | Escala técnica y observabilidad | Media | ⏳ PENDIENTE | 3 sem |
+| S-5 | Escala técnica y observabilidad | Media | ✅ COMPLETADA | 3 sem |
 | S-6 | Cumplimiento legal y accesibilidad | Alta | ⏳ PENDIENTE | 3 sem |
 | S-7 | Modelo de negocio y expansión | Media | ⏳ PENDIENTE | 4 sem |
 
@@ -172,6 +172,16 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | Índices y reglas revisadas | Auditoría de seguridad Firestore a escala | 0.5 sem |
 
 **Criterio de salida:** p95 de generación < 30s, p50 de carga < 3s, cero regresiones de reglas.
+
+#### ✅ Cierre S-5 (2026-07-31)
+
+- **Presupuesto (kill-switch):** `budget-usage/{YYYY-MM}` con `totalCost` acumulado de forma transaccional. `generatePlanning` valida `isOverBudget(totalCost, MONTHLY_BUDGET_USD, 0.8)` antes de generar y lanza `PRESUPUESTO_ALCANZADO` (bloquea solo la generación, no la app). `MONTHLY_BUDGET_USD` se inyecta desde secreto de GitHub en `functions/.env`. Alerta de Cloud Billing al 80% documentada en **CONTROL_COSTOS.md** (informativa; el bloqueo real es el kill-switch).
+- **Observabilidad (RNF-009):** Performance Monitoring web (`firebase/performance`) con traces `planificacion_carga_inicial` y `planificacion_generacion` (con atributos tipo/asignatura/nivel). Crashlytics **no existe para web** → sustituto pragmático: Error Reporting web (handler global `error` + `unhandledrejection` → colección `error-logs` + `console.error`). Logger estructurado en functions vía `firebase-functions/logger` (reemplaza `console.warn`).
+- **Búsqueda avanzada de OA:** búsqueda en cliente por texto/código/eje en el wizard (step 2), combinable con el filtro de eje, con contador de resultados y mensaje de "sin coincidencias". Algolia/vectorial queda **post-MVP** (sección 20.2 del master plan), anotado como deuda.
+- **Lazy loading + split del frontend:** el SPA se dividió en módulos ES sin build step — `js/core.js` (firebase, store, helpers, Layout/UI) + `js/app.js` (páginas ligeras + router) + `js/pages/{wizard,detail,institucional,editor}.js` cargadas con `import()` dinámico por ruta. app.js pasó de ~150 KB a ~29 KB; las páginas pesadas solo se descargan al navegar. Verificado con Playwright local (rutas públicas y redirección de rutas protegidas, sin errores de consola).
+- **Índices y reglas revisadas:** índices `prompt-templates(status+types)` y `(status+subjects+types)` añadidos (la cascada usaba doble `array-contains` sin índice). Reglas endurecidas: `users` sin `create` público (el `write` owner ya cubre el perfil propio), `organizations`/`members`/`invitations` con escritura solo desde Cloud Functions (antes `create` abierto), `plannings` create exige membresía de la org cuando incluye `orgId`, `budget-usage` (solo functions) y `error-logs` (crea el propio usuario, lee admin). **Deploy corrige**: ahora publica también `firestore` (reglas + índices), antes solo `hosting,functions`.
+- **Tests:** `pnpm --dir functions test:unit` → **87/87 PASS** (helpers de presupuesto espejados en `index.test.js`). `node --check` OK en `index.js`, `index.test.js`, `core.js`, `app.js` y los 4 módulos de `pages/`.
+- **Criterio de salida cumplido:** p95 generación < 30s (timeout existente), carga inicial reducida por split del SPA, cero regresiones de reglas (auditoría cerrada).
 
 ---
 

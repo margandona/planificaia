@@ -1277,3 +1277,34 @@ describe('S-4 Red Teaming / Prompt Injection', () => {
     expect(sanitizeContextFields(null)).toEqual({});
   });
 });
+
+// Espejo de helpers de presupuesto (patrón del repo: index.test.js duplica la lógica).
+const BUDGET_USAGE_COLLECTION = 'budget-usage';
+
+function budgetId(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function isOverBudget(totalCost, budgetUsd = 100, softLimitPct = 0.8) {
+  return totalCost >= budgetUsd * softLimitPct;
+}
+
+describe('S-5 Budget / Presupuesto', () => {
+  test('budgetId genera el mes en formato YYYY-MM', () => {
+    expect(budgetId(new Date('2026-07-15T12:00:00Z'))).toBe('2026-07');
+    expect(budgetId(new Date('2026-12-31T23:59:59Z'))).toBe('2026-12');
+  });
+
+  test('isOverBudget respeta el soft limit de 80%', () => {
+    expect(isOverBudget(79.99)).toBe(false);
+    expect(isOverBudget(80)).toBe(true);
+    expect(isOverBudget(100)).toBe(true);
+    expect(isOverBudget(0)).toBe(false);
+  });
+
+  test('isOverBudget acepta umbral personalizado', () => {
+    expect(isOverBudget(49.99, 200, 0.25)).toBe(false);
+    expect(isOverBudget(50, 200, 0.25)).toBe(true);
+  });
+});

@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { onCall, onRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions/logger';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from 'docx';
 
 initializeApp();
@@ -47,6 +48,43 @@ const DEFAULT_LIMITS = {
   maxOutputTokens: 4000,
   requestTimeoutMs: 30000,
 };
+
+// Presupuesto mensual de IA: soft limit al 80% (kill-switch solo de generación).
+// MONTHLY_BUDGET_USD se define en functions/.env (deploy escribe desde GitHub secrets).
+const MONTHLY_BUDGET_USD = Number(process.env.MONTHLY_BUDGET_USD || 100);
+const BUDGET_SOFT_LIMIT_PCT = 0.8;
+const BUDGET_USAGE_COLLECTION = 'budget-usage';
+
+function budgetId(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function isOverBudget(totalCost, budgetUsd = MONTHLY_BUDGET_USD, softLimitPct = BUDGET_SOFT_LIMIT_PCT) {
+  return totalCost >= budgetUsd * softLimitPct;
+}
+
+async function getMonthlyBudgetUsage() {
+  const ref = db.collection(BUDGET_USAGE_COLLECTION).doc(budgetId());
+  const snap = await ref.get();
+  return { ref, totalCost: snap.exists ? (snap.data().totalCost || 0) : 0 };
+}
+
+// Registra el costo en budget-usage/{YYYY-MM} de forma transaccional (suma atómica).
+async function recordBudgetUsage(cost) {
+  const month = budgetId();
+  const ref = db.collection(BUDGET_USAGE_COLLECTION).doc(month);
+  await db.runTransaction(async (t) => {
+    const snap = await t.get(ref);
+    const prev = snap.exists ? (snap.data().totalCost || 0) : 0;
+    t.set(ref, {
+      month,
+      totalCost: prev + cost,
+      updatedAt: new Date().toISOString(),
+    });
+  });
+  return ref;
+}
 
 const PLANNING_TYPES = {
   class: { label: 'Clase', minOA: 1, maxOA: 4 },
@@ -757,7 +795,7 @@ async function callDeepSeek(systemPrompt, userPrompt, timeoutMs, maxTokens) {
     let content = extractJson(rawContent);
     if (!content && result.choices[0].finish_reason === 'length') {
       // JSON truncado por límite de tokens: reintento con presupuesto mayor
-      console.warn('DeepSeek JSON truncado, reintentando con más tokens...');
+      logger.warn('DeepSeek JSON truncado, reintentando con más tokens...');
       clearTimeout(timeout);
       const retry = await fetch(AI_PROVIDERS.DEEPSEEK.endpoint, {
         method: 'POST',
@@ -873,7 +911,7 @@ async function generateFromProvider(systemPrompt, userPrompt, useFallback = fals
       if (!isGeminiFallbackEnabled()) {
         throw error;
       }
-      console.warn('DeepSeek falló, usando Gemini fallback:', error.message);
+      logger.warn('DeepSeek falló, usando Gemini fallback:', { error: error.message });
       return await callGemini(systemPrompt, userPrompt, timeout);
     }
   }
@@ -1227,6 +1265,12 @@ export const generatePlanning = onCall(
       throw new Error('LIMITE_DIARIO_ALCANZADO');
     }
 
+    // 1b. Validar presupuesto mensual (soft limit 80%): bloquea solo generación.
+    const { totalCost: monthlyCost } = await getMonthlyBudgetUsage();
+    if (isOverBudget(monthlyCost)) {
+      throw new Error('PRESUPUESTO_ALCANZADO');
+    }
+
     // 2. Validar entrada
     if (!context || !oaIds?.length) {
       throw new Error('CONTEXTO_INCOMPLETO');
@@ -1378,7 +1422,7 @@ export const generatePlanning = onCall(
         createdAt: new Date().toISOString(),
       });
 
-      if (error.message.includes('LIMITE_DIARIO') || error.message.includes('CONTEXTO_INCOMPLETO')) {
+      if (error.message.includes('LIMITE_DIARIO') || error.message.includes('CONTEXTO_INCOMPLETO') || error.message.includes('PRESUPUESTO_ALCANZADO')) {
         throw error;
       }
       throw new Error(`ERROR_GENERACION: ${error.message}`);
@@ -1430,7 +1474,7 @@ export const generatePlanning = onCall(
           createdAt: new Date().toISOString(),
         });
       } catch (coherenceError) {
-        console.warn('Coherence review skipped:', coherenceError.message);
+        logger.warn('Coherence review skipped:', { error: coherenceError.message });
         await db.collection('audit-logs').add({
           userId,
           action: 'coherence_review_error',
@@ -1457,6 +1501,9 @@ export const generatePlanning = onCall(
       qualityVerdict: quality.verdict,
       createdAt: new Date().toISOString(),
     });
+
+    // 10b. Registrar costo en presupuesto mensual (transaccional, kill-switch).
+    await recordBudgetUsage(aiResult.cost);
 
     // 11. Log de auditoría
     await db.collection('audit-logs').add({
@@ -2187,7 +2234,7 @@ export const onNewAuditLog = onDocumentCreated(
   (event) => {
     const log = event.data?.data();
     if (log?.action?.includes('error') || log?.action?.includes('incident')) {
-      console.warn('Evento crítico de auditoría:', log);
+      logger.warn('Evento crítico de auditoría:', { action: log.action, resource: log.resource, userId: log.userId });
     }
   }
 );

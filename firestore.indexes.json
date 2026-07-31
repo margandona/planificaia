@@ -99,11 +99,36 @@
       ]
     },
     {
+      "collectionGroup": "prompt-templates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "types", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "prompt-templates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "subjects", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "types", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
       "collectionGroup": "invitations",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "token", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ai-costs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
       ]
     }
   ],
