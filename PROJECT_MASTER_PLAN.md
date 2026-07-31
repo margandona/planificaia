@@ -25,7 +25,7 @@
 | Elemento | Estado |
 |---|---|
 | Investigacion curricular | COMPLETADA |
-| Investigacion normativa | COMPLETADA (parcial - requiere revision juridica) |
+| Investigacion normativa | COMPLETADA (revisada en S-0, ver REVISION_JURIDICA.md; 3 puntos traspasados a S-6) |
 | Definicion de producto | COMPLETADA |
 | Arquitectura tecnica | ACTUALIZADA (Firebase + DeepSeek + Gemini Flash) |
 | Diseno de IA | ACTUALIZADO (DeepSeek primario, Gemini Flash fallback) |

@@ -24,8 +24,8 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 
 | Fase | Nombre | Prioridad | Estado | Esfuerzo |
 |------|--------|-----------|--------|----------|
-| S-0 | Consolidación y habilitadores | Alta | ⏳ PENDIENTE | 2 sem |
-| S-1 | Cobertura curricular completa | Alta | ⏳ PENDIENTE | 4 sem |
+| S-0 | Consolidación y habilitadores | Alta | ✅ COMPLETADA | 2 sem |
+| S-1 | Cobertura curricular completa | Alta | ✅ COMPLETADA | 4 sem |
 | S-2 | Tipos de planificación extendidos | Alta | ⏳ PENDIENTE | 4 sem |
 | S-3 | Colaboración e institucional | Media | ⏳ PENDIENTE | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ⏳ PENDIENTE | 4 sem |
@@ -50,6 +50,8 @@ Basado en el estado actual: MVP desplegado, 666 OA oficiales (5 asignaturas × 8
 | Auditoría de dependencias | `pnpm audit` + fijar lockfile | 0.5 sem |
 
 **Criterio de salida:** deploy con 1 clic, tests verdes, fallback Gemini operativo.
+
+**Cierre S-0 (2026-07-31):** CI/CD operativo (`.github/workflows/ci.yml`: unit + `pnpm audit` + E2E Playwright contra producción; `deploy.yml`: hosting + functions automático en push a main, ambos **success**). Fallback Gemini operativo: `GEMINI_API_KEY` y `DEEPSEEK_API_KEY` en secrets de GitHub, deploy escribe `functions/.env` desde secrets (`GEMINI_FALLBACK_ENABLED=true`). Auditoría de dependencias: `pnpm audit --prod` → **0 vulnerabilidades**. E2E Playwright 11/11 cubriendo landing, login, registro, wizard-redirect, privacidad, términos, accesibilidad, responsive y console errors. Revisión jurídica: **REVISION_JURIDICA.md** — investigación normativa del master plan confirmada vigente; H02 (licencia uso contenido Mineduc), H01 (adecuación Ley 21.719 antes 01/12/2026) y H04/H05 (términos versionados, delegado datos) traspasados a S-6.
 
 ---
 
