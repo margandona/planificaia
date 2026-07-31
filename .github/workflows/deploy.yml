@@ -47,6 +47,10 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
+      - name: Diagnose active service account
+        run: |
+          node -e "const {GoogleAuth} = require('google-auth-library'); const a = new GoogleAuth({scopes: 'https://www.googleapis.com/auth/cloud-platform'}); a.getClient().then(async c => { const u = await c.getClientEmail?.() ?? await c.getEmail?.() ?? 'unknown'; console.log('ACTIVE_SA=' + u); })" 2>&1 || true
+
       - name: Deploy to Firebase
         run: |
           npx firebase-tools deploy --only hosting,functions --project planificacion-con-ia --force
