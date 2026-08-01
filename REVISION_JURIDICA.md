@@ -55,7 +55,7 @@ de estudiantes.
 | # | Hallazgo | Severidad | Estado |
 |---|---|---|---|
 | H01 | Ley 21.719 vigente el 01/12/2026: el producto debe adecuar su política de privacidad y registros de tratamiento antes de esa fecha | Alta | **RESUELTO (S-6)** — política de privacidad publicada conforme a 19.628 y en adecuación a 21.719 (base legal, ARCO, retención, DPO, menores <16) |
-| H02 | **Verificar licencia de uso del currículum Mineduc** (scraping de curriculumnacional.cl): el texto oficial de OA se usa para fines educativos; confirmar que no se requiere autorización para uso en producto de terceros | Alta | **PENDIENTE — validación jurídica** (fuera del alcance técnico; el uso se declara educativo y no comercial como obra propia en los términos) |
+| H02 | **Verificar licencia de uso del currículum Mineduc** (scraping de curriculumnacional.cl): el texto oficial de OA se usa para fines educativos; confirmar que no se requiere autorización para uso en producto de terceros | Alta | **RESUELTO (decisión del propietario, 2026-08-01)** — el currículum Mineduc es contenido oficial de **uso público** para fines educativos (Bases Curriculares y OA publicados por el Estado); se usa íntegro y sin modificación como referencia, se cita como fuente y se declara el uso educativo y no comercial en los términos |
 | H03 | El producto no trata datos de menores (diseño PR004) — mitigación estructural del riesgo más alto de la ley 21.719 | — | Confirmado en implementación (filtros PII, sin almacenar prompts con datos) |
 | H04 | Términos de uso y política de privacidad existen en frontend (`/privacy`, `/terms`) pero no están versionados ni con fecha de aceptación | Media | **RESUELTO (S-6: RF-013)** — términos y privacidad versionados (`TERMS_VERSION`/`PRIVACY_VERSION`), aceptación al registrarse y re-consentimiento con modal |
 | H05 | El "delegado de protección de datos" (art. 50 ley 21.719) no aplica obligatoriamente hoy al volumen de datos, pero se recomienda designarlo antes de 01/12/2026 | Media | **DOCUMENTADO (S-6)** — sección 8 de la política de privacidad; se designará DPO si el volumen lo exige antes de la vigencia |
@@ -68,9 +68,8 @@ La investigación normativa del master plan se confirma **sustancialmente correc
 El diseño del producto (sin datos de estudiantes, supervisión docente, trazabilidad) está
 alineado con la normativa vigente y con la ley 21.719 próxima a entrar en vigor.
 
-**Únicos pendientes de revisión jurídica profesional:**
-1. **H02**: licencia de uso del contenido curricular Mineduc (alto, bloqueante para institucional).
-2. **H01**: adecuación a ley 21.719 antes de 01/12/2026.
+**Único pendiente de revisión jurídica profesional:**
+1. **H01**: adecuación a ley 21.719 antes de 01/12/2026 (fecha de vigencia).
 
 **Decisión:** S-0 revisión jurídica = COMPLETADA a nivel técnico; los tres puntos pasan a
 S-6 como tareas ya identificadas y priorizadas. El criterio de salida de S-0 (deploy 1 clic,
@@ -81,6 +80,13 @@ tests verdes, fallback Gemini operativo) se cumple independientemente de estos p
 ## 5. Actualización S-6 (2026-07-31)
 
 Los hallazgos H01 (adecuación Ley 21.719), H04 (términos versionados) y H05 (DPO) se
-**resolvieron en S-6** (ver tabla de hallazgos). Solo H02 (licencia Mineduc) queda pendiente
-de validación jurídica externa. Implementación técnica detallada en el cierre de S-6 de
-`PLAN_ESCALADO.md`.
+**resolvieron en S-6** (ver tabla de hallazgos). Implementación técnica detallada en el cierre
+de S-6 de `PLAN_ESCALADO.md`.
+
+## 6. Actualización S-7 (2026-08-01)
+
+**H02 resuelto por decisión del propietario:** el currículum Mineduc es contenido oficial de
+uso público para fines educativos; PlanificaIA lo usa íntegro y sin modificación como
+referencia, citando la fuente y declarando uso educativo y no comercial en los términos.
+Queda así **cerrada la revisión jurídica** con el único compromiso activo de H01 (adecuación
+a la ley 21.719 antes de su vigencia el 01/12/2026).
