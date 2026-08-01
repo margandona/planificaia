@@ -1308,3 +1308,51 @@ describe('S-5 Budget / Presupuesto', () => {
     expect(isOverBudget(50, 200, 0.25)).toBe(true);
   });
 });
+
+// Espejo de helpers S-6 (patrón del repo: index.test.js duplica la lógica).
+const TERMS_VERSION = '2026-07-31';
+const PRIVACY_VERSION = '2026-07-31';
+
+const RETENTION_POLICY = {
+  'ai-costs': { days: 730 },
+  'audit-logs': { days: 365 },
+  'error-logs': { days: 365 },
+};
+
+function retentionCutoffIso(days, now = new Date()) {
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function validateTermsAcceptance(data) {
+  if (!data || typeof data.version !== 'string') return 'DATOS_INVALIDOS';
+  if (data.version !== TERMS_VERSION) return 'VERSION_TERMINOS_DESACTUALIZADA';
+  if (typeof data.privacyVersion !== 'string' || data.privacyVersion !== PRIVACY_VERSION) return 'VERSION_PRIVACIDAD_DESACTUALIZADA';
+  return null;
+}
+
+describe('S-6 Cumplimiento legal y accesibilidad', () => {
+  test('retentionCutoffIso calcula el corte hacia atrás', () => {
+    const now = new Date('2026-07-31T12:00:00Z');
+    const year = retentionCutoffIso(365, now);
+    expect(year).toBe('2025-07-31T12:00:00.000Z');
+    const twoYears = retentionCutoffIso(730, now);
+    expect(twoYears).toBe('2024-07-31T12:00:00.000Z');
+  });
+
+  test('la política de retención cumple 29.3 (costos 2 años, logs 1 año)', () => {
+    expect(RETENTION_POLICY['ai-costs'].days).toBe(730);
+    expect(RETENTION_POLICY['audit-logs'].days).toBe(365);
+    expect(RETENTION_POLICY['error-logs'].days).toBe(365);
+  });
+
+  test('validateTermsAcceptance acepta la versión vigente', () => {
+    expect(validateTermsAcceptance({ version: TERMS_VERSION, privacyVersion: PRIVACY_VERSION })).toBeNull();
+  });
+
+  test('validateTermsAcceptance rechaza versiones desactualizadas o ausentes', () => {
+    expect(validateTermsAcceptance(null)).toBe('DATOS_INVALIDOS');
+    expect(validateTermsAcceptance({})).toBe('DATOS_INVALIDOS');
+    expect(validateTermsAcceptance({ version: '2020-01-01', privacyVersion: PRIVACY_VERSION })).toBe('VERSION_TERMINOS_DESACTUALIZADA');
+    expect(validateTermsAcceptance({ version: TERMS_VERSION, privacyVersion: '2020-01-01' })).toBe('VERSION_PRIVACIDAD_DESACTUALIZADA');
+  });
+});

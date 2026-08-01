@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { onCall, onRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions/logger';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from 'docx';
 
@@ -2236,5 +2237,90 @@ export const onNewAuditLog = onDocumentCreated(
     if (log?.action?.includes('error') || log?.action?.includes('incident')) {
       logger.warn('Evento crítico de auditoría:', { action: log.action, resource: log.resource, userId: log.userId });
     }
+  }
+);
+
+// ─── S-6: Cumplimiento legal y accesibilidad ─────────────
+
+// Versiones vigentes de términos y privacidad (RF-013: aceptación versionada).
+// Cambiar estos valores al publicar una nueva versión fuerza re-aceptación.
+export const TERMS_VERSION = '2026-07-31';
+export const PRIVACY_VERSION = '2026-07-31';
+
+// Retención de datos (sección 29.3 del master plan):
+// trazabilidad/costos IA 2 años, logs de auditoría y de error 1 año.
+export const RETENTION_POLICY = {
+  'ai-costs': { days: 730, desc: 'Costos IA: 2 años' },
+  'audit-logs': { days: 365, desc: 'Logs de auditoría: 1 año' },
+  'error-logs': { days: 365, desc: 'Logs de error: 1 año' },
+};
+
+export function retentionCutoffIso(days, now = new Date()) {
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function validateTermsAcceptance(data) {
+  if (!data || typeof data.version !== 'string') return 'DATOS_INVALIDOS';
+  if (data.version !== TERMS_VERSION) return 'VERSION_TERMINOS_DESACTUALIZADA';
+  if (typeof data.privacyVersion !== 'string' || data.privacyVersion !== PRIVACY_VERSION) return 'VERSION_PRIVACIDAD_DESACTUALIZADA';
+  return null;
+}
+
+async function deleteExpiredBatch(collectionName, days, maxIterations = 10) {
+  const cutoff = retentionCutoffIso(days);
+  let deleted = 0;
+  for (let i = 0; i < maxIterations; i++) {
+    const snap = await db.collection(collectionName).where('createdAt', '<', cutoff).limit(500).get();
+    if (snap.empty) break;
+    const batch = db.batch();
+    snap.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    deleted += snap.size;
+  }
+  return deleted;
+}
+
+// Aceptación versionada de términos/privacidad. Guarda versión + fecha en el
+// perfil del usuario y deja trazabilidad en audit-logs. El frontend muestra un
+// modal de re-consentimiento cuando la versión vigente no coincide.
+export const acceptTerms = onCall(async (request) => {
+  const userId = request.auth?.uid;
+  if (!userId) throw new Error('REQUIERE_AUTENTICACION');
+  const error = validateTermsAcceptance(request.data);
+  if (error) throw new Error(error);
+  const now = new Date().toISOString();
+  await db.collection('users').doc(userId).update({
+    termsVersion: TERMS_VERSION,
+    termsAcceptedAt: now,
+    privacyVersion: PRIVACY_VERSION,
+    privacyAcceptedAt: now,
+    updatedAt: now,
+  });
+  await db.collection('audit-logs').add({
+    userId,
+    action: 'accept-terms',
+    resource: 'user',
+    resourceId: userId,
+    version: TERMS_VERSION,
+    createdAt: now,
+  });
+  return { ok: true, version: TERMS_VERSION, privacyVersion: PRIVACY_VERSION, acceptedAt: now };
+});
+
+// Purga automática diaria (03:00 Santiago) de datos vencidos según 29.3.
+export const cleanupRetention = onSchedule(
+  { schedule: '0 3 * * *', timeZone: 'America/Santiago' },
+  async () => {
+    const report = {};
+    for (const [name, policy] of Object.entries(RETENTION_POLICY)) {
+      try {
+        report[name] = await deleteExpiredBatch(name, policy.days);
+      } catch (e) {
+        report[name] = { error: e.message };
+        logger.error(`cleanupRetention falló en ${name}`, e);
+      }
+    }
+    logger.info('cleanupRetention ejecutado', report);
+    return report;
   }
 );

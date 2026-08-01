@@ -30,7 +30,7 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | S-3 | Colaboración e institucional | Media | ✅ COMPLETADA | 6 sem |
 | S-4 | Calidad de IA y evaluación | Alta | ✅ COMPLETADA | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ✅ COMPLETADA | 3 sem |
-| S-6 | Cumplimiento legal y accesibilidad | Alta | ⏳ PENDIENTE | 3 sem |
+| S-6 | Cumplimiento legal y accesibilidad | Alta | ✅ COMPLETADA | 3 sem |
 | S-7 | Modelo de negocio y expansión | Media | ⏳ PENDIENTE | 4 sem |
 
 ---
@@ -197,6 +197,15 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | Términos versionados | Aceptación versionada (RF-013) | 0.5 sem |
 
 **Criterio de salida:** auditoría de accesibilidad pasa, políticas publicadas y versionadas.
+
+#### ✅ Cierre S-6 (2026-07-31)
+
+- **Revisión Ley 19.628 (datos personales):** política de privacidad reescrita y publicada en `/#/privacidad`, conforme a la Ley 19.628 vigente y en adecuación a la **Ley 21.719** (vigencia 01/12/2026). Incluye: responsable del tratamiento, base legal (contrato + consentimiento), datos recopilados vs. NO recopilados (sin datos de estudiantes, mitigación PR004/H03), tratamiento y cesión (solo proveedores de IA con contexto pedagógico sin PII), **retención de datos** (tabla 29.3), derechos ARCO (acceso, rectificación, supresión, oposición, portabilidad), seguridad, **Delegado de Protección de Datos** (art. 50 Ley 21.719, H05), prohibición de menores de 16 y cambios versionados (H01).
+- **Términos versionados (RF-013, H04):** página `/#/terminos` reescrita con aceptación versionada, supervisión docente, responsabilidad final del docente, prohibición de datos de estudiantes, propiedad intelectual (currículum Mineduc), cancelación y cambios versionados. Versiones vigentes `TERMS_VERSION = PRIVACY_VERSION = '2026-07-31'` en `core.js`/`index.js`. **Registro al registrarse:** el perfil del usuario guarda `termsVersion`/`privacyVersion` + fecha de aceptación. **Re-consentimiento:** callable `acceptTerms` (backend valida la versión y deja trazabilidad en `audit-logs`) + **modal bloqueante** en el frontend cuando la versión aceptada no coincide con la vigente (los usuarios existentes deben re-aceptar).
+- **Retención de datos (sección 29.3):** función programada `cleanupRetention` (Cloud Scheduler, 03:00 diaria hora de Santiago) que purga `ai-costs` con `createdAt` > 2 años, `audit-logs` y `error-logs` > 1 año, en lotes de 500 con límite de iteraciones por colección y reporte en logs. Helper puro `retentionCutoffIso(days, now)` espejado en tests.
+- **WCAG 2.2 AA (RNF-001):** auditoría automatizada con **axe-core** (`axe.min.js` 4.10.2) añadida a `frontend.test.py` (`test_axe_accessibility`) que escanea las 5 rutas públicas contra las etiquetas `wcag2a/aa`, `wcag21a/aa`, `wcag22a/aa`. **0 violaciones.** Correcciones aplicadas: contraste del footer y de la frase de la landing (`slate-400`→`slate-500`), nombres accesibles en los `<select>` de registro y perfil (faltaban `id`+`for`), `type="button"` en botones fuera de formularios, `aria-hidden` en emojis decorativos, **skip-link al contenido** (`#contenido`) y `id` en `<main>` (WCAG 2.4.1).
+- **Tests:** `pnpm --dir functions test:unit` → **91/91 PASS** (S-6: `retentionCutoffIso`, política de retención, `validateTermsAcceptance` con versión vigente/desactualizada). `node --check` OK en `index.js`, `index.test.js`, `core.js` y `app.js`. Auditoría axe local previa a deploy: CLEAN.
+- **Criterio de salida cumplido:** auditoría de accesibilidad pasa (axe-core 0 violaciones WCAG 2.2 AA), políticas publicadas (privacidad + términos) y versionadas (aceptación versionada RF-013 con re-consentimiento automático). Pendientes jurídicos H01 (adecuación antes del 01/12/2026) y H05 (DPO) documentados e implementados; H02 (licencia Mineduc) sigue requiriendo validación de abogado (fuera del alcance técnico).
 
 ---
 

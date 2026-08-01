@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from './core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin } from './core.js';
 
 // Páginas ligeras (carga inicial). Las páginas pesadas viven en /js/pages/*.js
 // y se cargan con import() dinámico (S-5.4).
@@ -9,7 +9,7 @@ const LandingPage = defineComponent({
       h('div', { class: 'text-center py-16' }, [
         h('h1', { class: 'text-5xl font-bold text-slate-900 mb-3' }, 'PlanificaIA'),
         h('p', { class: 'text-xl text-slate-500 max-w-xl mx-auto mb-6' }, 'Generador ético de planificaciones educativas asistido por inteligencia artificial'),
-        h('p', { class: 'text-base text-slate-400 italic mb-8' }, 'La IA propone, el sistema verifica y el docente decide.'),
+        h('p', { class: 'text-base text-slate-500 italic mb-8' }, 'La IA propone, el sistema verifica y el docente decide.'),
         h('div', { class: 'flex justify-center gap-3' }, [
           store.user
             ? h('a', { href: '#/dashboard', class: 'bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition' }, 'Ir al Dashboard')
@@ -19,17 +19,17 @@ const LandingPage = defineComponent({
       ]),
       h('div', { class: 'grid md:grid-cols-3 gap-6 max-w-4xl mx-auto pb-16' }, [
         Card([h('div', { class: 'p-6' }, [
-          h('div', { class: 'text-3xl mb-3' }, '🎯'),
+          h('div', { class: 'text-3xl mb-3', 'aria-hidden': 'true' }, '🎯'),
           h('h3', { class: 'font-semibold mb-1' }, 'Alineación Curricular'),
           h('p', { class: 'text-sm text-slate-500' }, 'OA desde el currículum oficial chileno. La IA nunca modifica el texto oficial.'),
         ])]),
         Card([h('div', { class: 'p-6' }, [
-          h('div', { class: 'text-3xl mb-3' }, '👩‍🏫'),
+          h('div', { class: 'text-3xl mb-3', 'aria-hidden': 'true' }, '👩‍🏫'),
           h('h3', { class: 'font-semibold mb-1' }, 'Control Docente'),
           h('p', { class: 'text-sm text-slate-500' }, 'Tú decides. Edita, regenera por secciones y aprueba antes de exportar.'),
         ])]),
         Card([h('div', { class: 'p-6' }, [
-          h('div', { class: 'text-3xl mb-3' }, '🔒'),
+          h('div', { class: 'text-3xl mb-3', 'aria-hidden': 'true' }, '🔒'),
           h('h3', { class: 'font-semibold mb-1' }, 'Privacidad Primero'),
           h('p', { class: 'text-sm text-slate-500' }, 'Sin datos personales de estudiantes. Información agregada solamente.'),
         ])]),
@@ -85,7 +85,8 @@ const RegisterPage = defineComponent({
         const cred = await createUserWithEmailAndPassword(auth, f.email, f.password);
         await updateProfile(cred.user, { displayName: f.displayName });
         await sendEmailVerification(cred.user);
-        await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, email: f.email, displayName: f.displayName, level: f.level, institutionType: f.institutionType, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        const now = new Date().toISOString();
+        await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, email: f.email, displayName: f.displayName, level: f.level, institutionType: f.institutionType, termsVersion: TERMS_VERSION, termsAcceptedAt: now, privacyVersion: PRIVACY_VERSION, privacyAcceptedAt: now, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         store.user = cred.user;
         go('/verificar-email');
       } catch (e) { error.value = mapError(e.code); } finally { loading.value = false; }
@@ -100,17 +101,17 @@ const RegisterPage = defineComponent({
         h('form', { onSubmit: (e) => { e.preventDefault(); register(); }, class: 'space-y-3' }, [
           h('div', { class: 'grid grid-cols-2 gap-3' }, [
             h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nombre'), h('input', { type: 'text', required: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', placeholder: 'Tu nombre', onInput: (e) => f.displayName = e.target.value })]),
-            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { required: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', onInput: (e) => f.level = e.target.value }, [h('option', { value: '', disabled: true }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))])]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1', for: 'reg-level' }, 'Nivel'), h('select', { id: 'reg-level', required: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', onInput: (e) => f.level = e.target.value }, [h('option', { value: '', disabled: true }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))])]),
           ]),
           h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Correo'), h('input', { type: 'email', required: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', placeholder: 'docente@ejemplo.cl', onInput: (e) => f.email = e.target.value })]),
           h('div', { class: 'grid grid-cols-2 gap-3' }, [
             h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Contraseña'), h('input', { type: 'password', required: true, minLength: 6, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', placeholder: 'Mín. 6 caracteres', onInput: (e) => f.password = e.target.value })]),
             h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Confirmar'), h('input', { type: 'password', required: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none', placeholder: 'Repite', onInput: (e) => f.confirm = e.target.value })]),
           ]),
-          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Establecimiento (opcional)'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => f.institutionType = e.target.value }, ...institutions.map(([v, l]) => h('option', { value: v }, l)))]),
+          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1', for: 'reg-institution' }, 'Establecimiento (opcional)'), h('select', { id: 'reg-institution', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => f.institutionType = e.target.value }, ...institutions.map(([v, l]) => h('option', { value: v }, l)))]),
           h('label', { class: 'flex items-start gap-2 text-xs text-slate-500 cursor-pointer' }, [
             h('input', { type: 'checkbox', class: 'mt-0.5', onChange: (e) => f.acceptTerms = e.target.checked }),
-            h('span', ['Acepto la ', h('a', { href: '#/terminos', class: 'text-blue-600 hover:underline' }, 'política de privacidad'), ' y ', h('a', { href: '#/terminos', class: 'text-blue-600 hover:underline' }, 'términos')]),
+            h('span', ['Acepto la ', h('a', { href: '#/privacidad', class: 'text-blue-600 hover:underline', onClick: (e) => e.stopPropagation() }, 'política de privacidad'), ' y los ', h('a', { href: '#/terminos', class: 'text-blue-600 hover:underline', onClick: (e) => e.stopPropagation() }, 'términos de uso'), ` (versión ${TERMS_VERSION})`]),
           ]),
           h('button', { type: 'submit', disabled: loading.value, class: 'w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition flex items-center justify-center gap-2' }, loading.value ? [Spinner(4), 'Creando cuenta...'] : 'Crear cuenta'),
         ]),
@@ -135,11 +136,11 @@ const VerifyEmailPage = defineComponent({
       h('p', { class: 'font-medium text-slate-800 mb-6' }, store.user.email),
       h('p', { class: 'text-xs text-slate-400 mb-6' }, 'Revisa tu bandeja de entrada y spam. Luego haz clic en "Ya verifiqué".'),
       h('div', { class: 'space-y-2' }, [
-        h('button', { onClick: send, disabled: loading.value, class: 'w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, loading.value ? 'Enviando...' : 'Reenviar verificación'),
-        h('button', { onClick: check, class: 'w-full bg-slate-100 text-slate-700 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition' }, 'Ya verifiqué mi correo'),
+        h('button', { type: 'button', onClick: send, disabled: loading.value, class: 'w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, loading.value ? 'Enviando...' : 'Reenviar verificación'),
+        h('button', { type: 'button', onClick: check, class: 'w-full bg-slate-100 text-slate-700 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition' }, 'Ya verifiqué mi correo'),
         resent.value ? h('p', { class: 'text-xs text-green-600 mt-2' }, '✓ Correo reenviado') : null,
       ]),
-      h('button', { onClick: () => { signOut(auth); go('/login'); }, class: 'mt-6 text-xs text-slate-400 hover:text-slate-600 underline' }, 'Volver al inicio de sesión'),
+      h('button', { type: 'button', onClick: () => { signOut(auth); go('/login'); }, class: 'mt-6 text-xs text-slate-400 hover:text-slate-600 underline' }, 'Volver al inicio de sesión'),
     ]));
   }
 });
@@ -269,15 +270,118 @@ const ProfilePage = defineComponent({
             h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nombre'), h('input', { type: 'text', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: form.displayName, onInput: (e) => form.displayName = e.target.value })]),
             h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Correo'), h('input', { type: 'email', disabled: true, class: 'w-full border border-slate-300 rounded-lg px-3 py-2 bg-slate-50 text-slate-500', value: store.user?.email })])]),
           h('div', { class: 'grid md:grid-cols-2 gap-4' }, [
-            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Nivel'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: form.level, onInput: (e) => form.level = e.target.value }, [h('option', { value: '' }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))])]),
-            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Establecimiento'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: form.institutionType, onInput: (e) => form.institutionType = e.target.value }, [['', 'Selecciona...'], ['municipal', 'Municipal'], ['subvencionado', 'Subvencionado'], ['particular', 'Particular'], ['otro', 'Otro']].map(([v, l]) => h('option', { value: v }, l)))])]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1', for: 'perfil-nivel' }, 'Nivel'), h('select', { id: 'perfil-nivel', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: form.level, onInput: (e) => form.level = e.target.value }, [h('option', { value: '' }, 'Selecciona...'), ...levels.map(([v, l]) => h('option', { value: v }, l))])]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1', for: 'perfil-institucion' }, 'Establecimiento'), h('select', { id: 'perfil-institucion', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: form.institutionType, onInput: (e) => form.institutionType = e.target.value }, [['', 'Selecciona...'], ['municipal', 'Municipal'], ['subvencionado', 'Subvencionado'], ['particular', 'Particular'], ['otro', 'Otro']].map(([v, l]) => h('option', { value: v }, l)))])]),
           h('button', { type: 'submit', disabled: saving.value, class: 'bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, saving.value ? 'Guardando...' : 'Guardar cambios'),
         ])]),
       h('div', { class: 'mt-6' }, Card([h('div', { class: 'p-6' }, [
         h('h3', { class: 'text-base font-semibold text-red-600 mb-1' }, 'Eliminar cuenta'),
         h('p', { class: 'text-sm text-slate-500 mb-3' }, 'Exportaremos tus planificaciones antes de eliminar. Esta acción no se puede deshacer.'),
-        h('button', { onClick: deleteAccount, disabled: saving.value, class: 'bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition' }, 'Eliminar mi cuenta'),
+        h('button', { type: 'button', onClick: deleteAccount, disabled: saving.value, class: 'bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition' }, 'Eliminar mi cuenta'),
       ])])),
+    ]);
+  }
+});
+
+// ──────────── Páginas legales (S-6: Ley 19.628 / Ley 21.719, RF-013) ────────────
+
+const Legal = (title, version, children) => h(Layout, { title }, () => [
+  h('div', { class: 'max-w-3xl text-sm text-slate-600 space-y-6' }, [
+    h('p', { class: 'text-xs text-slate-500' }, `Versión ${version} · Última actualización: 31 de julio de 2026`),
+    ...children,
+  ]),
+]);
+
+const PrivacyPage = () => Legal('Política de Privacidad', PRIVACY_VERSION, [
+  h('p', 'En PlanificaIA nos tomamos la privacidad muy en serio. Esta política explica qué datos tratamos, para qué y tus derechos. Es conforme a la Ley 19.628 (texto vigente) y está diseñada para cumplir la Ley 21.719, que entrará en vigencia el 01/12/2026.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '1. Responsable del tratamiento'),
+  h('p', 'PlanificaIA (MaKuaZ) es el responsable del tratamiento de los datos personales recopilados en esta plataforma. Consultas: privacidad@planificaia.cl.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '2. Datos que recopilamos y para qué'),
+  h('ul', { class: 'list-disc list-inside space-y-1' }, [
+    h('li', 'Correo y nombre: creación de la cuenta y comunicación de tu cuenta.'),
+    h('li', 'Preferencias: nivel educativo y tipo de establecimiento, para mejorar tu experiencia.'),
+    h('li', 'Contenido de planificaciones: el trabajo que creas, almacenado en tu cuenta.'),
+    h('li', 'Datos de uso técnico: trazas de rendimiento y registros de error, sin datos personales identificables.'),
+  ]),
+  h('p', 'La base legal del tratamiento es la ejecución del contrato de servicio y tu consentimiento expreso al aceptar estos términos y esta política.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '3. Datos que NO recopilamos'),
+  h('ul', { class: 'list-disc list-inside space-y-1' }, [
+    h('li', 'No tratamos datos de estudiantes: ni nombres, RUT, correos, diagnósticos clínicos, calificaciones ni fotografías.'),
+    h('li', 'No tratamos datos sensibles (salud, biometría, opiniones políticas).'),
+    h('li', 'El diseño del producto lo impide y el sistema filtra datos personales en los envíos a los proveedores de IA.'),
+  ]),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '4. Tratamiento y cesión'),
+  h('p', 'No vendemos ni cedemos tus datos a terceros. Para generar planificaciones enviamos el contexto pedagógico (nivel, asignatura, objetivos, contexto de tu curso) a proveedores de IA: DeepSeek (primario) y Gemini Flash de Google (respaldo). No se incluyen datos personales identificables.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '5. Retención de datos'),
+  h('ul', { class: 'list-disc list-inside space-y-1' }, [
+    h('li', 'Perfil de usuario: mientras la cuenta esté activa, más 90 días.'),
+    h('li', 'Planificaciones: mientras exista la cuenta.'),
+    h('li', 'Trazabilidad y costos de IA: 2 años.'),
+    h('li', 'Logs de auditoría y de error: 1 año.'),
+  ]),
+  h('p', 'Los datos vencidos se eliminan automáticamente mediante una tarea programada diaria.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '6. Tus derechos'),
+  h('p', 'Tienes derecho de acceso, rectificación, supresión, oposición y portabilidad sobre tus datos. Puedes ejercerlos desde "Mi Perfil" (exportar y eliminar tus datos) o escribiendo a privacidad@planificaia.cl.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '7. Seguridad'),
+  h('p', 'Usamos cifrado en tránsito (HTTPS), reglas de seguridad de acceso por propietario y acceso restringido a los datos por parte del equipo. Los datos se alojan en infraestructura de Google Cloud (región us-central1).'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '8. Delegado de Protección de Datos'),
+  h('p', 'De acuerdo con el artículo 50 de la Ley 21.719, si el volumen de datos lo exige se designará un Delegado de Protección de Datos antes de la vigencia de esa ley (01/12/2026). Contacto del responsable: privacidad@planificaia.cl.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '9. Menores de 16 años'),
+  h('p', 'El servicio está dirigido a docentes y personal educativo. No está dirigido a menores de 16 años y no debes ingresar datos de estudiantes en ningún campo.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '10. Cambios a esta política'),
+  h('p', 'Esta política es versionada. Si se publica una versión nueva con cambios relevantes, te solicitaremos su aceptación antes de continuar usando el servicio.'),
+]);
+
+const TermsPage = () => Legal('Términos de Uso', TERMS_VERSION, [
+  h('p', 'Estos Términos de Uso regulan el acceso y uso de PlanificaIA, un generador de planificaciones educativas asistido por inteligencia artificial, alineado al currículum chileno. Al crear una cuenta aceptas estos términos.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '1. Aceptación y versionado'),
+  h('p', 'Al registrarte aceptas esta versión de los términos. Los términos son vinculantes y versionados; si publicamos una versión nueva te pediremos aceptación antes de continuar.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '2. El servicio'),
+  h('p', 'PlanificaIA genera borradores de planificaciones de clase, unidad, mensuales, anuales, evaluaciones y multigrado, usando el currículum oficial del Ministerio de Educación de Chile.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '3. Inteligencia artificial y supervisión humana'),
+  h('p', 'Las planificaciones se generan con modelos de IA (DeepSeek primario, Gemini Flash de respaldo). Todo contenido generado es un borrador: la IA propone, el sistema verifica y el docente decide.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '4. Responsabilidad del docente'),
+  h('p', 'El docente es responsable del contenido final de sus planificaciones y debe revisarlas, adaptarlas a su contexto y aprobarlas antes de usarlas. El contenido generado no reemplaza el criterio profesional.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '5. Datos de estudiantes'),
+  h('p', 'Queda estrictamente prohibido ingresar datos personales de estudiantes (nombres, RUT, correos, diagnósticos, calificaciones u otros) en la plataforma. El incumplimiento puede conllevar la suspensión de la cuenta.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '6. Cuentas'),
+  h('p', 'Debes mantener seguras tus credenciales y eres responsable de la actividad de tu cuenta. Puedes eliminar tu cuenta y tus datos en cualquier momento desde "Mi Perfil".'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '7. Contenido curricular'),
+  h('p', 'Los textos oficiales del currículum se usan con fines educativos y pertenecen a sus titulares (Ministerio de Educación de Chile). No se reutilizan como obra propia ni se redistribuyen fuera de la plataforma.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '8. Propiedad intelectual del usuario'),
+  h('p', 'Tus planificaciones te pertenecen. Puedes exportarlas (PDF, DOCX) y conservarlas fuera de la plataforma.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '9. Limitación de responsabilidad'),
+  h('p', 'El servicio se entrega "tal cual". No garantizamos disponibilidad ininterrumpida ni exactitud total del contenido generado. El uso es bajo tu responsabilidad y conforme a la normativa educacional vigente.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '10. Cambios a los términos'),
+  h('p', 'Podemos actualizar estos términos con aviso previo mediante una nueva versión que deberás aceptar. La versión vigente es siempre la más reciente publicada en esta página.'),
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, '11. Contacto'),
+  h('p', 'Consultas: hola@planificaia.cl · Privacidad: privacidad@planificaia.cl.'),
+]);
+
+// ──────────── Modal de re-consentimiento (RF-013) ────────────
+
+const TermsConsentModal = defineComponent({
+  setup() {
+    const error = ref(''); const loading = ref(false);
+    const accept = async () => {
+      loading.value = true; error.value = '';
+      try {
+        await acceptTermsFn({ version: TERMS_VERSION, privacyVersion: PRIVACY_VERSION });
+        if (store.profile) { store.profile.termsVersion = TERMS_VERSION; store.profile.privacyVersion = PRIVACY_VERSION; }
+        else { store.profile = { termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION }; }
+      } catch (e) { error.value = 'No se pudo registrar la aceptación. Reintenta.'; } finally { loading.value = false; }
+    };
+    return () => h('div', { class: 'fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'consent-title' }, [
+      h('div', { class: 'bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6' }, [
+        h('h2', { id: 'consent-title', class: 'text-lg font-bold text-slate-900 mb-2' }, 'Términos actualizados'),
+        h('p', { class: 'text-sm text-slate-600 mb-4' }, `Publicamos una nueva versión de nuestros Términos de Uso y Política de Privacidad (versión ${TERMS_VERSION}). Para continuar usando PlanificaIA, debes leer y aceptar la nueva versión.`),
+        h('div', { class: 'flex gap-3 mb-4 text-sm' }, [
+          h('a', { href: '#/terminos', class: 'text-blue-600 hover:underline' }, 'Leer Términos de Uso'),
+          h('a', { href: '#/privacidad', class: 'text-blue-600 hover:underline' }, 'Leer Política de Privacidad'),
+        ]),
+        h('div', { role: 'alert' }, [Alert('error', error.value)]),
+        h('button', { onClick: accept, disabled: loading.value, class: 'w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, loading.value ? 'Guardando...' : 'He leído y acepto la nueva versión'),
+      ]),
     ]);
   }
 });
@@ -302,20 +406,8 @@ async function resolveRoute() {
     '/verificar-email': VerifyEmailPage,
     '/dashboard': DashboardPage,
     '/perfil': ProfilePage,
-    '/privacidad': () => h(Layout, { title: 'Política de Privacidad' }, () => [
-      h('div', { class: 'prose max-w-3xl text-sm space-y-3' }, [
-        h('p', 'En PlanificaIA nos tomamos la privacidad muy en serio. No almacenamos datos personales de estudiantes.'),
-        h('h3', 'Datos que recopilamos'), h('ul', [h('li', 'Correo y nombre (solo para tu cuenta)'), h('li', 'Preferencias de nivel y asignatura'), h('li', 'Contenido de planificaciones')]),
-        h('h3', 'Datos que NO recopilamos'), h('ul', [h('li', 'No almacenamos nombres, RUT, correos ni diagnósticos de estudiantes'), h('li', 'No compartimos datos con terceros')]),
-        h('h3', 'Proveedores de IA'), h('p', 'Las planificaciones se generan con DeepSeek (primario) y Gemini Flash (fallback). No se envían datos personales.'),
-        h('h3', 'Tus derechos'), h('p', 'Puedes exportar y eliminar tus datos desde "Mi Perfil".'),
-      ]),
-    ]),
-    '/terminos': () => h(Layout, { title: 'Términos de Uso' }, () => [
-      h('div', { class: 'prose max-w-3xl text-sm space-y-3' }, [
-        h('ul', [h('li', 'La IA genera borradores que requieren revisión y aprobación docente.'), h('li', 'El docente es responsable del contenido final.'), h('li', 'No debes ingresar datos personales de estudiantes.'), h('li', 'El uso es para fines educativos.')]),
-      ]),
-    ]),
+    '/privacidad': PrivacyPage,
+    '/terminos': TermsPage,
   };
 
   return routes[hash] || LandingPage;
@@ -380,6 +472,9 @@ const App = defineComponent({
       return h('div', { class: 'flex items-center justify-center min-h-screen' }, [
         h('div', { class: 'text-center' }, [Spinner(10), h('p', { class: 'text-sm text-slate-400 mt-3' }, 'Cargando PlanificaIA...')]),
       ]);
+    }
+    if (store.user && store.user.emailVerified && !hasAcceptedTerms()) {
+      return h(TermsConsentModal);
     }
     return h(this.currentView);
   }

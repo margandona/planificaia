@@ -135,9 +135,24 @@ const createOrganizationFn = httpsCallable(fx, 'createOrganization');
 const inviteMemberFn = httpsCallable(fx, 'inviteMember');
 const acceptInviteFn = httpsCallable(fx, 'acceptInvite');
 const removeMemberFn = httpsCallable(fx, 'removeMember');
+const acceptTermsFn = httpsCallable(fx, 'acceptTerms');
 
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
+
+// ──────────── Términos y privacidad versionados (S-6 / RF-013) ────────────
+
+// Versión vigente. Al publicar una versión nueva se fuerza re-aceptación en el
+// frontend (modal) y `acceptTerms` valida la versión en el backend.
+const TERMS_VERSION = '2026-07-31';
+const PRIVACY_VERSION = '2026-07-31';
+
+const hasAcceptedTerms = () => {
+  if (!store.user || !store.user.emailVerified) return true;
+  return !!store.profile
+    && store.profile.termsVersion === TERMS_VERSION
+    && store.profile.privacyVersion === PRIVACY_VERSION;
+};
 
 // ──────────── Catálogo curricular (Parvularia → 4° medio) ────────────
 
@@ -264,6 +279,8 @@ const Layout = defineComponent({
     const logout = async () => { await signOut(auth); store.user = null; store.profile = null; store.org = null; store.orgRole = null; store.claims = null; go('/'); };
 
     return () => h('div', { class: 'min-h-screen flex flex-col' }, [
+      // Enlace de salto al contenido (WCAG 2.4.1 Bypass Blocks)
+      h('a', { href: '#contenido', class: 'sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:bg-blue-600 focus:text-white focus:px-3 focus:py-2 focus:rounded-lg focus:text-sm', 'aria-label': 'Saltar al contenido principal' }, 'Saltar al contenido'),
       // Navbar
       h('nav', { class: 'bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50', role: 'navigation', 'aria-label': 'Navegación principal' }, [
         h('div', { class: 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14' }, [
@@ -279,21 +296,21 @@ const Layout = defineComponent({
             h('a', { href: '#/dashboard', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Dashboard'),
             (store.org || isAdmin()) ? h('a', { href: '#/institucional', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Institucional') : null,
             h('a', { href: '#/perfil', class: 'text-sm text-slate-600 hover:text-slate-900' }, store.user.displayName || store.user.email),
-            h('button', { onClick: logout, class: 'text-sm text-red-600 hover:text-red-700' }, 'Salir'),
+            h('button', { type: 'button', onClick: logout, class: 'text-sm text-red-600 hover:text-red-700' }, 'Salir'),
           ]),
         ]),
       ]),
       // Main content
-      h('main', { class: 'flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full', role: 'main' }, [
+      h('main', { id: 'contenido', class: 'flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full', role: 'main' }, [
         props.title ? PageTitle(props.title, props.subtitle) : null,
         slots.default ? slots.default() : null,
       ]),
       // Footer
       h('footer', { class: 'bg-white border-t border-slate-200 mt-auto py-6', role: 'contentinfo' }, [
-        h('div', { class: 'max-w-7xl mx-auto px-4 text-center text-xs text-slate-400 space-x-4' }, [
+        h('div', { class: 'max-w-7xl mx-auto px-4 text-center text-xs text-slate-500 space-x-4' }, [
           h('span', '© 2026 PlanificaIA — MaKuaZ'),
-          h('a', { href: '#/privacidad', class: 'hover:text-slate-600 underline' }, 'Privacidad'),
-          h('a', { href: '#/terminos', class: 'hover:text-slate-600 underline' }, 'Términos'),
+          h('a', { href: '#/privacidad', class: 'hover:text-slate-700 underline' }, 'Privacidad'),
+          h('a', { href: '#/terminos', class: 'hover:text-slate-700 underline' }, 'Términos'),
         ]),
       ]),
     ]);
@@ -301,4 +318,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin };
+export { DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin };

@@ -137,10 +137,15 @@ def test_privacy_page():
     has_title = "Privacidad" in content
     has_deepseek = "DeepSeek" in content
     has_gemini = "Gemini" in content
+    has_ley = "19.628" in content or "21.719" in content
+    has_retencion = "Retención" in content
+    has_dpo = "Delegado" in content or "delegado" in content
+    has_version = "Versión" in content
 
     browser.close()
     p.stop()
-    report("Privacy Page", has_title and has_deepseek and has_gemini, f"title:{has_title} deepseek:{has_deepseek} gemini:{has_gemini}")
+    report("Privacy Page", has_title and has_deepseek and has_gemini and has_ley and has_retencion and has_dpo and has_version,
+           f"title:{has_title} ley:{has_ley} retencion:{has_retencion} dpo:{has_dpo} version:{has_version}")
 
 
 def test_terms_page():
@@ -153,10 +158,13 @@ def test_terms_page():
     content = page.content()
     has_title = "Terminos" in content or "Términos" in content
     has_docente = "docente" in content.lower()
+    has_version = "Versión" in content
+    has_versionado = "version" in content.lower() and "acepta" in content.lower()
 
     browser.close()
     p.stop()
-    report("Terms Page", has_title and has_docente)
+    report("Terms Page", has_title and has_docente and has_version and has_versionado,
+           f"title:{has_title} docente:{has_docente} version:{has_version} versionado:{has_versionado}")
 
 
 def test_footer():
@@ -197,6 +205,45 @@ def test_accessibility():
     browser.close()
     p.stop()
     report("Accessibility Basics", has_main and has_focus, f"main:{has_main} focus:{has_focus}")
+
+
+def test_axe_accessibility():
+    # Auditoría WCAG 2.2 AA (S-6, RNF-001) con axe-core sobre rutas públicas.
+    axe_src = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
+    routes = ['', '/#/login', '/#/registro', '/#/privacidad', '/#/terminos']
+    all_violations = []
+
+    p = sync_playwright().start()
+    browser = p.chromium.launch(headless=True)
+    for route in routes:
+        page = browser.new_page()
+        page.goto(f"{BASE_URL}{route}")
+        page.wait_for_load_state('networkidle')
+        page.wait_for_timeout(800)
+        page.add_script_tag(url=axe_src)
+        try:
+            result = page.evaluate("""() => {
+                return new Promise((resolve) => {
+                    axe.run(document, {
+                        runOnly: { type: 'tag', values: ['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22a','wcag22aa'] }
+                    }).then((r) => resolve(r.violations.map((v) => ({
+                        id: v.id, impact: v.impact, help: v.help,
+                        nodes: v.nodes.length,
+                        targets: v.nodes.slice(0, 3).map((n) => n.target.join(' '))
+                    })))).catch(() => resolve([]));
+                });
+            }""")
+        except Exception as exc:
+            result = []
+            all_violations.append(f"{route}: ERROR {exc}")
+        for v in result:
+            all_violations.append(f"{route}: {v['id']} ({v['impact']}) x{v['nodes']} - {v['help']}")
+        page.close()
+
+    browser.close()
+    p.stop()
+    ok = len(all_violations) == 0
+    report("Axe WCAG 2.2 AA", ok, f"violations: {all_violations}" if all_violations else "0 violaciones en 5 rutas")
 
 
 def test_mobile_responsive():
@@ -266,6 +313,7 @@ if __name__ == "__main__":
         ("Terms Page", test_terms_page),
         ("Footer Links", test_footer),
         ("Accessibility", test_accessibility),
+        ("Axe WCAG 2.2 AA", test_axe_accessibility),
         ("Mobile Responsive", test_mobile_responsive),
         ("Wizard Redirect", test_wizard_redirect),
         ("No Console Errors", test_no_console_errors),
