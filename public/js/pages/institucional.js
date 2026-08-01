@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin } from '../core.js';
 
 // Carga diferida (S-5.4): panel institucional e invitaciones.
 const InstitucionalPage = defineComponent({
@@ -21,12 +21,32 @@ const InstitucionalPage = defineComponent({
     const inviteRole = ref('teacher');
     const inviteLink = ref('');
 
+    const planSel = reactive({});
+    const savingPlan = reactive({});
+    const planChange = (uid, plan) => { planSel[uid] = plan; };
+
+    const savePlan = async (m) => {
+      err.value = ''; ok.value = '';
+      if (!planSel[m.uid]) return;
+      savingPlan[m.uid] = true;
+      try {
+        await setUserPlanFn({ targetUid: m.uid, plan: planSel[m.uid] });
+        ok.value = `Plan de ${m.displayName || m.email} actualizado a ${PLANS[planSel[m.uid]].label}.`;
+        await load();
+      } catch (e) {
+        const msg = { ACCESO_NO_AUTORIZADO: 'Solo un administrador puede asignar planes.' }[e.message] || e.message || 'No se pudo actualizar el plan.';
+        err.value = msg;
+      }
+      finally { savingPlan[m.uid] = false; }
+    };
+
     const load = async () => {
       loading.value = true; err.value = '';
       try {
         if (store.org) {
           const mSnap = await getDocs(collection(db, 'organizations', store.org.id, 'members'));
           members.value = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          members.value.forEach(m => { if (!planSel[m.uid]) planSel[m.uid] = m.plan || 'free'; });
           const iSnap = await getDocs(query(collection(db, 'organizations', store.org.id, 'invitations'), where('status', '==', 'pending')));
           invites.value = iSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           const pSnap = await getDocs(query(collection(db, 'plannings'), where('orgId', '==', store.org.id), orderBy('createdAt', 'desc'), limit(30)));
@@ -168,6 +188,29 @@ const InstitucionalPage = defineComponent({
               ])
             )),
         ])]),
+
+        isOrgAdmin() ? Card([h('div', { class: 'p-5' }, [
+          h('h3', { class: 'font-medium text-sm text-slate-700 mb-3' }, 'Planes del equipo'),
+          h('p', { class: 'text-xs text-slate-400 mb-3' }, 'Asigna el plan de cada docente: Free (10 generaciones/día) o Pro (1000/día).'),
+          members.value.length === 0 ? h('p', { class: 'text-sm text-slate-400' }, 'Sin miembros aún.') :
+            h('div', { class: 'space-y-2' }, members.value.map(m =>
+              h('div', { class: 'flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2' }, [
+                h('div', [
+                  h('p', { class: 'text-sm font-medium text-slate-800' }, m.displayName || m.email),
+                  h('p', { class: 'text-xs text-slate-400' }, m.email),
+                ]),
+                m.role === 'owner'
+                  ? h('span', { class: 'text-xs text-slate-400' }, PLANS[planSel[m.uid]]?.label || 'Free')
+                  : h('div', { class: 'flex items-center gap-2' }, [
+                      h('select', { class: 'border border-slate-300 rounded-lg px-2 py-1 text-xs', value: planSel[m.uid], onChange: (e) => planChange(m.uid, e.target.value) }, [
+                        h('option', { value: 'free' }, 'Free'),
+                        h('option', { value: 'pro' }, 'Pro'),
+                      ]),
+                      h('button', { onClick: () => savePlan(m), disabled: savingPlan[m.uid], class: 'text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50 transition' }, savingPlan[m.uid] ? 'Guardando...' : 'Guardar'),
+                    ]),
+              ])
+            )),
+        ])]) : null,
 
         Card([h('div', { class: 'p-5' }, [
           h('div', { class: 'flex items-center justify-between mb-3' }, [

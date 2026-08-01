@@ -5,7 +5,7 @@ const WizardPage = defineComponent({
   setup() {
     if (!guard()) return () => null;
     const step = ref(1);
-    const data = reactive({ type: 'class', title: '', level: '', level2: '', subject: '', oaIds: [], numClasses: 6, evaluationType: 'formativa', instrument: 'prueba', duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
+    const data = reactive({ type: 'class', title: '', level: '', level2: '', subject: '', oaIds: [], numClasses: 6, evaluationType: 'formativa', instrument: 'prueba', duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', methodologies: [], barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
     const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
     const axisFilter = ref('');
     const searchQuery = ref('');
@@ -102,7 +102,8 @@ const WizardPage = defineComponent({
             studentCount: data.studentCount,
             priorKnowledge: data.priorKnowledge,
             resources: data.resources ? data.resources.split(',').map(r => r.trim()) : [],
-            methodology: data.methodology,
+            methodology: isMultiMethod() ? '' : data.methodology,
+            methodologies: isMultiMethod() ? data.methodologies : (data.methodology ? [data.methodology] : []),
             barriers: data.barriers,
             framework: data.framework,
             dua: data.framework === 'dua' ? data.dua : null,
@@ -150,7 +151,7 @@ const WizardPage = defineComponent({
         ].map(([val, icon, tit, desc, tag]) =>
           h('button', {
             class: `p-4 rounded-xl border-2 text-left transition ${data.type === val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`,
-            onClick: () => { data.type = val; step.value = 2; }
+            onClick: () => { data.type = val; data.methodology = ''; data.methodologies = []; step.value = 2; }
           }, [
             h('span', { class: 'text-2xl' }, icon),
             h('p', { class: 'font-medium mt-1' }, tit),
@@ -211,12 +212,37 @@ const WizardPage = defineComponent({
       h('button', { onClick: () => step.value = 4, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
+    const METHOD_OPTIONS = [['Clase dialogada', 'dialogada'], ['Aprendizaje Basado en Problemas', 'abp'], ['Aprendizaje Cooperativo', 'cooperativo'], ['Indagación', 'indagacion'], ['Gamificación', 'gamificacion'], ['Pensamiento Visible', 'pensamiento-visible']];
+    const multiMethodTypes = ['unit', 'monthly', 'annual'];
+    const isMultiMethod = () => multiMethodTypes.includes(data.type);
+    const toggleMethod = (v) => {
+      const i = data.methodologies.indexOf(v);
+      if (i >= 0) data.methodologies.splice(i, 1);
+      else if (data.methodologies.length < 4) data.methodologies.push(v);
+    };
+    const methodSelected = (v) => isMultiMethod() ? data.methodologies.includes(v) : data.methodology === v;
+
     const step4 = () => h('div', { class: 'space-y-4' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Enfoque Metodológico'),
+      h('p', { class: 'text-sm text-slate-500' }, isMultiMethod()
+        ? 'Selecciona una o más metodologías: se distribuirán y combinarán entre las clases/semanas.'
+        : 'Elige la metodología principal.'),
       h('div', { class: 'grid grid-cols-2 gap-2 max-w-lg' },
-        [['Clase dialogada', 'dialogada'], ['Aprendizaje Basado en Problemas', 'abp'], ['Aprendizaje Cooperativo', 'cooperativo'], ['Indagación', 'indagacion'], ['Gamificación', 'gamificacion'], ['Pensamiento Visible', 'pensamiento-visible']].map(([l, v]) =>
-          h('button', { class: `p-3 rounded-lg border text-left text-sm transition ${data.methodology === v ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`, onClick: () => { data.methodology = v; step.value = 5; } }, l)
+        METHOD_OPTIONS.map(([l, v]) =>
+          h('button', {
+            class: `p-3 rounded-lg border text-left text-sm transition ${methodSelected(v) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`,
+            onClick: () => {
+              if (isMultiMethod()) toggleMethod(v);
+              else { data.methodology = v; data.methodologies = [v]; step.value = 5; }
+            },
+            'aria-pressed': methodSelected(v),
+          }, l)
         )),
+      isMultiMethod() ? h('button', {
+        class: `mt-2 bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium transition ${data.methodologies.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'}`,
+        disabled: data.methodologies.length === 0,
+        onClick: () => { step.value = 5; },
+      }, data.methodologies.length ? `Continuar (${data.methodologies.length} metodología${data.methodologies.length > 1 ? 's' : ''})` : 'Selecciona al menos una metodología') : null,
     ]);
 
     const step5 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
@@ -315,6 +341,18 @@ const WizardPage = defineComponent({
       if (i >= 0) arr.splice(i, 1); else arr.push(optKey);
     };
 
+    // DUA rápido (D): selección sugerida, marcar todas o limpiar en un clic.
+    const DUA_SUGGESTED = {
+      representacion: ['percepcion', 'conocimientos', 'formatos'],
+      accionExpresion: ['respuestas', 'organizadores', 'metas'],
+      implicacion: ['interes', 'relevancia', 'colaboracion'],
+    };
+    const duaAllKeys = () => duaGroups.reduce((acc, g) => { acc[g.key] = g.options.map(o => o[0]); return acc; }, {});
+    const setDuaSelection = (keys) => {
+      for (const g of duaGroups) data.dua[g.key] = (keys[g.key] || []).slice();
+    };
+    const duaTotal = () => { const all = duaAllKeys(); setDuaSelection(all); };
+
     const step7 = () => h('div', { class: 'space-y-4' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Inclusión y Accesibilidad'),
       h('p', { class: 'text-sm text-slate-500' }, 'Elige el marco pedagógico de inclusión y describe barreras (información agregada, sin diagnósticos individuales).'),
@@ -327,7 +365,13 @@ const WizardPage = defineComponent({
           h('p', { class: 'text-xs text-slate-500 mt-0.5' }, desc),
         ])
       )),
-      data.framework === 'dua' ? h('div', { class: 'space-y-3' }, duaGroups.map(g =>
+      data.framework === 'dua' ? h('div', { class: 'space-y-3' }, [
+        h('div', { class: 'flex flex-wrap gap-2 max-w-lg' }, [
+          h('button', { class: 'bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition', onClick: () => { setDuaSelection(DUA_SUGGESTED); } }, '⚡ DUA rápido (sugerido)'),
+          h('button', { class: 'bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-200 transition', onClick: duaTotal }, 'Marcar todas'),
+          h('button', { class: 'bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-200 transition', onClick: () => setDuaSelection({ representacion: [], accionExpresion: [], implicacion: [] }) }, 'Limpiar'),
+        ]),
+        duaGroups.map(g =>
         Card([h('div', { class: 'p-4' }, [
           h('h3', { class: 'font-medium text-sm text-slate-800 flex items-center gap-2' }, [h('span', g.icon), g.title]),
           h('p', { class: 'text-xs text-slate-500 mb-2' }, g.desc),
@@ -338,7 +382,9 @@ const WizardPage = defineComponent({
             ])
           )),
         ])])
-      )) : null,
+      ),
+      ])
+      : null,
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Barreras observadas (opcional)'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', rows: 3, placeholder: 'Ej: estudiantes que requieren apoyo en lectura...', onInput: (e) => data.barriers = e.target.value })]),
       h('p', { class: 'text-xs text-amber-600' }, 'No incluyas diagnósticos clínicos ni nombres de estudiantes.'),
       h('button', { onClick: () => step.value = 8, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),

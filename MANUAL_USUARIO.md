@@ -1,8 +1,8 @@
 # Manual de Usuario — PlanificaIA
 
-**Versión:** 1.0 · **Fecha:** 2026-08-01
+**Versión:** 1.1 · **Fecha:** 2026-08-01
 **Currículum:** oficial chileno (Mineduc)
-**Última URL:** https://planificaia.web.app
+**Última URL:** https://planificacion-con-ia.web.app
 
 ---
 
@@ -59,8 +59,12 @@ Desde el Dashboard pulsa **"+ Con IA"**. Se abre un asistente de 10 pasos:
 - ⚠ **Nunca escribas nombres ni RUT de estudiantes** en estos campos.
 
 ### Paso 4 — Enfoque metodológico
-Elige uno: clase dialogada, ABP, aprendizaje cooperativo, indagación, gamificación o
-pensamiento visible.
+Elige una metodología: clase dialogada, ABP, aprendizaje cooperativo, indagación, gamificación
+o pensamiento visible.
+
+Para **unidad didáctica, mensual y anual** puedes seleccionar **varias metodologías** (hasta 4)
+y la IA las distribuye a lo largo de las clases/semanas. En clase, evaluación y multigrado se
+elige una sola.
 
 ### Paso 5 — Estructura
 Se muestra la estructura sugerida para tu tipo. Puedes personalizarla después en el editor.
@@ -70,7 +74,8 @@ Enfocada en el **Decreto 67** (formativa/sumativa; en evaluación: tipo + instru
 
 ### Paso 7 — Inclusión y accesibilidad
 - **DUA completo** (recomendado): marca estrategias de representación, acción/expresión e
-  implicación.
+  implicación. El botón **"⚡ DUA rápido (sugerido)"** pre-marca una selección recomendada;
+  también puedes "Marcar todas" o "Limpiar".
 - **Formato estándar**: diferenciación básica.
 - Puedes describir **barreras observadas** de forma agregada, sin diagnósticos clínicos.
 
@@ -122,7 +127,8 @@ En **Mi Perfil**:
   - **Gratis**: 10 generaciones con IA por día.
   - **Pro**: 1.000 generaciones por día (asignado por administrador; para pilotos
     institucionales y equipos).
-- Ve tu insignia de plan y, si eres administrador, cambia el plan de otros usuarios.
+- Ve tu insignia de plan. Si administras un establecimiento, asigna los planes de tu equipo
+  desde el panel **Institucional** ("Planes del equipo").
 
 ## 7. Colaboración institucional
 
@@ -130,6 +136,7 @@ Si tu establecimiento está registrado, el **UTP (Unidad Técnico-Pedagógica)**
 
 - Aprobar planificaciones de los docentes del establecimiento.
 - Ver el estado de cada planificación (borrador/aprobada).
+- **Asignar planes (Free/Pro)** a cada docente del equipo desde el panel **Institucional**.
 - Mantener la trazabilidad de lo que se usará en aula.
 
 Un docente ve una planificación propia como **propietario**; la UTP la ve con capacidad de
@@ -165,6 +172,10 @@ está ahí. Los **Términos de Uso** describen el uso educativo del currículum 
 - **v1.0 (2026-08-01):** generación por IA con 6 tipos de planificación, editor manual,
   exportación DOCX/PDF, colaboración UTP, plan gratuito y Pro, página de Ayuda, términos y
   privacidad versionados, accesibilidad WCAG 2.2 AA.
+- **v1.1 (2026-08-01):** varias metodologías distribuidas por clase/semana en unidad, mensual y
+  anual; requisitos más estrictos en la generación (evaluación y duraciones obligatorias);
+  botón "DUA rápido" que pre-marca estrategias sugeridas; panel "Planes del equipo" en
+  Institucional para asignar Free/Pro por docente.
 
 ---
 

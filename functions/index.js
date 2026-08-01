@@ -181,19 +181,26 @@ const VALIDATION_RULES = [
     const totalActivityTime = (p.activities || []).reduce((sum, a) => sum + (a.duration || 0), 0);
     return totalActivityTime >= p.duration * 0.8 && totalActivityTime <= p.duration * 1.1;
   }},
-  // V-013: coherencia metodología ↔ actividades (solo si la metodología declara una familia conocida)
+  // V-013: coherencia metodología ↔ actividades. Soporta una o varias metodologías
+  // (B: unit/monthly/anual combinan métodos): cada familia declarada debe reflejarse
+  // al menos en una actividad/clase/semana.
   { id: 'V-013', type: 'warning', check: (p) => {
-    if (!p.methodology || p.type === 'evaluation') return true;
-    const method = String(p.methodology).toLowerCase();
-    const family = Object.keys(METHODOLOGY_KEYWORDS).find(k => method.includes(k));
-    if (!family) return true;
+    if (p.type === 'evaluation') return true;
+    const declared = Array.isArray(p.methodologies) && p.methodologies.length > 0
+      ? p.methodologies
+      : (p.methodology ? [p.methodology] : []);
+    if (declared.length === 0) return true;
+    const families = declared
+      .map(m => Object.keys(METHODOLOGY_KEYWORDS).find(k => String(m).toLowerCase().includes(k)))
+      .filter(Boolean);
+    if (families.length === 0) return true;
     const text = [
       ...(p.activities || []).map(a => `${a.description || ''} ${a.title || ''}`),
-      ...(p.unit?.classes || []).map(c => `${c.title || ''} ${c.purpose || ''}`),
-      ...(p.unit?.weeks || []).map(w => `${w.topic || ''}`),
+      ...(p.unit?.classes || []).map(c => `${c.title || ''} ${c.purpose || ''} ${(c.activities || []).map(a => `${a.title || ''} ${a.description || ''}`).join(' ')}`),
+      ...(p.unit?.weeks || []).map(w => `${w.topic || ''} ${(w.activities || []).map(a => `${a.title || ''} ${a.description || ''}`).join(' ')}`),
       p.purpose || '',
     ].join(' ').toLowerCase();
-    return METHODOLOGY_KEYWORDS[family].some(kw => text.includes(kw));
+    return families.every(family => METHODOLOGY_KEYWORDS[family].some(kw => text.includes(kw)));
   }},
   // V-014: barreras declaradas ↔ alternativas (diferenciación o DUA)
   { id: 'V-014', type: 'warning', check: (p) => {
@@ -281,6 +288,9 @@ function sanitizeContextFields(context) {
   const textFields = ['title', 'unit', 'priorKnowledge', 'studentCount', 'methodology', 'barriers', 'purpose', 'topic'];
   for (const f of textFields) {
     if (out[f] !== undefined) out[f] = sanitizeInput(String(out[f]));
+  }
+  if (Array.isArray(out.methodologies)) {
+    out.methodologies = out.methodologies.map(m => sanitizeInput(String(m))).filter(Boolean);
   }
   if (Array.isArray(out.resources)) out.resources = out.resources.map(r => sanitizeInput(String(r)));
   if (out.dua && typeof out.dua === 'object') {
@@ -1013,6 +1023,19 @@ function buildDuaPrompt(dua, framework) {
   return result;
 }
 
+// Si el usuario seleccionó varias metodologías (S: unit/monthly/anual combinan métodos),
+// pide a la IA que las distribuya y varie entre los bloques (clases/semanas) en lugar de
+// usar una sola para toda la planificación.
+function buildMethodologyDistribution(context) {
+  const methods = Array.isArray(context.methodologies) && context.methodologies.length > 0
+    ? context.methodologies
+    : (context.methodology ? [context.methodology] : []);
+  const known = methods.filter(Boolean);
+  if (known.length < 2) return '';
+  const list = known.join(', ');
+  return `\n\nMETODOLOGIAS COMBINADAS: el usuario selecciono ${known.length} metodologias (${list}). Distribuyelas de forma variada entre los bloques: aplica una metodologia distinta o combinaciones en cada bloque segun convenga al contenido, y menciona brevemente en cada bloque cual metodologia se usa (anade un campo "methodology" opcional en el bloque con el nombre). No uses la misma metodologia para todos los bloques.`;
+}
+
 // Construye la instrucción específica de tipo de planificación para el prompt.
 function buildTypeInstruction(type, context, oaDocs) {
   const oaCodes = oaDocs.map(oa => oa.code).join(', ');
@@ -1067,7 +1090,11 @@ Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
   "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
 }
 
-Debes generar EXACTAMENTE ${numClasses} clases (clases 1 a ${numClasses}), cada una con al menos 3 actividades (inicio, desarrollo, cierre). La secuencia didactica debe ser progresiva: las primeras clases construyen el conocimiento y las ultimas lo consolidan y evaluan.`;
+Debes generar EXACTAMENTE ${numClasses} clases (clases 1 a ${numClasses}), cada una con al menos 3 actividades (inicio, desarrollo, cierre). La secuencia didactica debe ser progresiva: las primeras clases construyen el conocimiento y las ultimas lo consolidan y evaluan.
+REGLAS OBLIGATORIAS:
+- Cada clase DEBE incluir su objeto "assessment" con al menos 2 "criteria" y una "feedbackStrategy" no vacia.
+- La suma de las "duration" de las actividades de cada clase DEBE ser igual a la "duration" de esa clase (tolerancia +-10%).
+- "unitAssessment" es OBLIGATORIO con al menos 2 "criteria" y "feedbackStrategy" no vacia.${buildMethodologyDistribution(context)}`;
   }
 
   if (type === 'monthly') {
@@ -1118,7 +1145,12 @@ Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
   "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
 }
 
-Debes generar EXACTAMENTE ${numWeeks} semanas, distribuyendo los OA de forma equilibrada entre ellas.`;
+Debes generar EXACTAMENTE ${numWeeks} semanas, distribuyendo los OA de forma equilibrada entre ellas.
+REGLAS OBLIGATORIAS:
+- Cada semana DEBE tener al menos 3 actividades (inicio, desarrollo, cierre), cada una con "duration".
+- La suma de las "duration" de las actividades de cada semana DEBE ser igual a la "duration" de esa semana (tolerancia +-10%).
+- Cada semana DEBE incluir su objeto "assessment" con al menos 2 "criteria" y una "feedbackStrategy" no vacia.
+- El "assessment" mensual (nivel unit) es OBLIGATORIO con al menos 2 "criteria" y "feedbackStrategy" no vacia.${buildMethodologyDistribution(context)}`;
   }
 
   if (type === 'annual') {
@@ -1154,7 +1186,9 @@ Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
   "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
 }
 
-Genera EXACTAMENTE ${numMonths} meses (1 a ${numMonths}), distribuyendo los OA de forma progresiva y equilibrada a lo largo del ano, respetando la complejidad creciente.`;
+Genera EXACTAMENTE ${numMonths} meses (1 a ${numMonths}), distribuyendo los OA de forma progresiva y equilibrada a lo largo del ano, respetando la complejidad creciente.
+REGLAS OBLIGATORIAS:
+- El "assessment" anual (nivel unit) es OBLIGATORIO con al menos 2 "criteria" y una "feedbackStrategy" no vacia.${buildMethodologyDistribution(context)}`;
   }
 
   if (type === 'evaluation') {
@@ -1225,7 +1259,10 @@ Genera UNICAMENTE un objeto JSON con EXACTAMENTE esta estructura:
   "dua": { "representacion": [], "accionExpresion": [], "implicacion": [] }
 }
 
-Cada actividad debe indicar el nivel al que apunta (targetLevel). Alterna actividades para cada nivel y considera momentos en que ambos niveles trabajan juntos. Genera al menos 4 actividades.`;
+Cada actividad debe indicar el nivel al que apunta (targetLevel). Alterna actividades para cada nivel y considera momentos en que ambos niveles trabajan juntos. Genera al menos 4 actividades.
+REGLAS OBLIGATORIAS:
+- La suma de las "duration" de las actividades DEBE ser igual a la duracion de la clase.
+- El "assessment" es OBLIGATORIO con al menos 2 "criteria" y una "feedbackStrategy" no vacia.`;
   }
 
   return '';
@@ -1256,7 +1293,10 @@ function buildPlanningRecord(userId, context, oaDocs, content, aiResult, promptT
     dua: content.dua || null,
     studentCount: context.studentCount || '',
     priorKnowledge: context.priorKnowledge || '',
-    methodology: context.methodology || '',
+    methodology: Array.isArray(context.methodologies) && context.methodologies.length > 0
+      ? context.methodologies.join(', ')
+      : (context.methodology || ''),
+    methodologies: Array.isArray(context.methodologies) ? context.methodologies : (context.methodology ? [context.methodology] : []),
     warnings: [],
     aiContributions: [{
       model: aiResult.model,
@@ -1844,6 +1884,13 @@ export const setUserPlan = onCall(
     if (!targetUid || !['free', 'pro'].includes(plan)) throw new Error('DATOS_INVALIDOS');
     const now = new Date().toISOString();
     await db.collection('users').doc(targetUid).set({ plan, updatedAt: now }, { merge: true });
+    // Refleja el plan en el doc del miembro de la org (si existe) para que el panel
+    // institucional muestre el plan actual al recargar.
+    const adminSnap = await db.collection('users').doc(request.auth.uid).get();
+    const adminOrgId = adminSnap.data()?.orgId;
+    if (adminOrgId) {
+      await db.collection('organizations').doc(adminOrgId).collection('members').doc(targetUid).set({ plan, updatedAt: now }, { merge: true });
+    }
     await db.collection('audit-logs').add({
       userId: request.auth.uid, action: 'set-plan', resource: 'user', resourceId: targetUid, plan, createdAt: now,
     });
