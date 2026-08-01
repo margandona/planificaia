@@ -1315,37 +1315,34 @@ export const generatePlanning = onCall(
     }
 
     // 4. Obtener plantilla de prompt (por asignatura + tipo, con fallback en cascada)
+    // Firestore permite máximo 1 filtro array-contains por consulta, así que la
+    // consulta se hace por tipo y la asignatura se filtra en memoria (el catálogo
+    // de plantillas es pequeño).
     const templateQuery = async (subject, t) => {
-      if (subject) {
-        const bySubject = await db
-          .collection('prompt-templates')
-          .where('status', '==', 'active')
-          .where('subjects', 'array-contains', subject)
-          .where('types', 'array-contains', t)
-          .limit(1)
-          .get();
-        if (!bySubject.empty) return bySubject.docs[0];
-      }
-      const byType = await db
+      const active = await db
         .collection('prompt-templates')
         .where('status', '==', 'active')
         .where('types', 'array-contains', t)
-        .limit(1)
+        .limit(50)
         .get();
-      if (!byType.empty) return byType.docs[0];
+      if (subject) {
+        const bySubject = active.docs.find((d) => (d.data().subjects || []).includes(subject));
+        if (bySubject) return bySubject;
+      }
+      if (!active.empty) return active.docs[0];
       if (subject) {
         const bySubjectAny = await db
           .collection('prompt-templates')
           .where('status', '==', 'active')
           .where('subjects', 'array-contains', subject)
-          .limit(1)
+          .limit(50)
           .get();
         if (!bySubjectAny.empty) return bySubjectAny.docs[0];
       }
       const generic = await db
         .collection('prompt-templates')
         .where('status', '==', 'active')
-        .limit(1)
+        .limit(50)
         .get();
       return generic.empty ? null : generic.docs[0];
     };

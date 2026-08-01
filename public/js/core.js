@@ -55,7 +55,7 @@ const db = getFirestore(fb);
 const fx = getFunctions(fb, 'us-central1');
 getAnalytics(fb);
 let perf = null;
-try { perf = getPerformance(fb); } catch (e) { /* Performance no disponible en dev */ }
+try { perf = getPerformance(fb, { instrumentationEnabled: false }); } catch (e) { /* Performance no disponible en dev */ }
 
 // ──────────── Observabilidad (S-5) ────────────
 
