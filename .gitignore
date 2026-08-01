@@ -12,3 +12,6 @@ ui-debug.log
 emulator.log
 .firebase/
 reports/
+
+__pycache__/
+*.pyc
