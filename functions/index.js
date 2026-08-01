@@ -4,7 +4,6 @@ import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
 import { onCall, onRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions/logger';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from 'docx';
 
@@ -1249,6 +1248,9 @@ export const generatePlanning = onCall(
       throw new Error('REQUIERE_AUTENTICACION');
     }
 
+    // Retención oportunista (S-6 / 29.3): purga datos vencidos con tope por colección.
+    await runRetentionSweep();
+
     const { context, oaIds, useFallback } = request.data;
     const userId = request.auth.uid;
     const today = new Date().toISOString().split('T')[0];
@@ -1539,6 +1541,9 @@ export const regenerateSection = onCall(
     if (!request.auth) {
       throw new Error('REQUIERE_AUTENTICACION');
     }
+
+    // Retención oportunista (S-6 / 29.3).
+    await runRetentionSweep();
 
     const { planningId, section } = request.data;
     const userId = request.auth.uid;
@@ -2266,18 +2271,24 @@ export function validateTermsAcceptance(data) {
   return null;
 }
 
-async function deleteExpiredBatch(collectionName, days, maxIterations = 10) {
-  const cutoff = retentionCutoffIso(days);
-  let deleted = 0;
-  for (let i = 0; i < maxIterations; i++) {
-    const snap = await db.collection(collectionName).where('createdAt', '<', cutoff).limit(500).get();
-    if (snap.empty) break;
-    const batch = db.batch();
-    snap.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    deleted += snap.size;
+// Barrido de retención con tope por colección (evita picos de latencia). Se
+// ejecuta de forma oportunista desde las funciones de mayor tráfico en lugar de
+// un Cloud Scheduler (la SA de CI no tiene cloudscheduler.jobs.update).
+const RETENTION_SWEEP_CAP = 20;
+
+export async function runRetentionSweep(cap = RETENTION_SWEEP_CAP) {
+  const report = {};
+  for (const [name, policy] of Object.entries(RETENTION_POLICY)) {
+    const cutoff = retentionCutoffIso(policy.days);
+    const snap = await db.collection(name).where('createdAt', '<', cutoff).limit(cap).get();
+    if (!snap.empty) {
+      const batch = db.batch();
+      snap.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+    report[name] = snap.size;
   }
-  return deleted;
+  return report;
 }
 
 // Aceptación versionada de términos/privacidad. Guarda versión + fecha en el
@@ -2307,20 +2318,10 @@ export const acceptTerms = onCall(async (request) => {
   return { ok: true, version: TERMS_VERSION, privacyVersion: PRIVACY_VERSION, acceptedAt: now };
 });
 
-// Purga automática diaria (03:00 Santiago) de datos vencidos según 29.3.
-export const cleanupRetention = onSchedule(
-  { schedule: '0 3 * * *', timeZone: 'America/Santiago' },
-  async () => {
-    const report = {};
-    for (const [name, policy] of Object.entries(RETENTION_POLICY)) {
-      try {
-        report[name] = await deleteExpiredBatch(name, policy.days);
-      } catch (e) {
-        report[name] = { error: e.message };
-        logger.error(`cleanupRetention falló en ${name}`, e);
-      }
-    }
-    logger.info('cleanupRetention ejecutado', report);
-    return report;
-  }
-);
+// Purga oportunista de datos vencidos (S-6 / 29.3). Se ejecuta desde las
+// funciones de mayor tráfico (generatePlanning/regenerateSection) con tope por
+// colección. Un Cloud Scheduler sería el mecanismo ideal, pero la SA de CI no
+// tiene cloudscheduler.jobs.update (misma limitación IAM que firestore.rules),
+// por lo que el barrido en línea es el sustituto pragmático desplegable.
+// Cuando la SA tenga el rol, se puede reinstalar onSchedule + cleanupRetention.
+// Se deja la declaración de la política y el cutoff en este archivo para tests.
