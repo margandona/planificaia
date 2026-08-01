@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { getStorage } from 'firebase-admin/storage';
-import { onCall, onRequest } from 'firebase-functions/v2/https';
+import { onCall, onRequest, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions/logger';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } from 'docx';
@@ -45,7 +45,7 @@ const AI_PROVIDERS = {
 
 const DEFAULT_LIMITS = {
   dailyGenerations: 10,
-  maxOutputTokens: 4000,
+  maxOutputTokens: 8000,
   requestTimeoutMs: 30000,
 };
 
@@ -806,9 +806,13 @@ async function callDeepSeek(systemPrompt, userPrompt, timeoutMs, maxTokens) {
 
     // Intento 1: parse robusto
     let content = extractJson(rawContent);
-    if (!content && result.choices[0].finish_reason === 'length') {
-      // JSON truncado por límite de tokens: reintento con presupuesto mayor
-      logger.warn('DeepSeek JSON truncado, reintentando con más tokens...');
+
+    // Si la respuesta quedó truncada por el límite de tokens (finish_reason='length'),
+    // se reintenta con un presupuesto mayor aunque el JSON parcial haya parseado:
+    // un bloque balanceado cortado a la mitad puede ser JSON válido pero incompleto
+    // (p. ej. unidades/mensuales con menos clases de las pedidas).
+    if (result.choices[0].finish_reason === 'length') {
+      logger.warn('DeepSeek JSON truncado (finish_reason=length), reintentando con más tokens...');
       clearTimeout(timeout);
       const retry = await fetch(AI_PROVIDERS.DEEPSEEK.endpoint, {
         method: 'POST',
@@ -824,14 +828,15 @@ async function callDeepSeek(systemPrompt, userPrompt, timeoutMs, maxTokens) {
             { role: 'assistant', content: rawContent },
           ],
           temperature: 0.5,
-          max_tokens: 6000,
+          max_tokens: 8000,
           response_format: { type: 'json_object' },
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       const retryResult = await retry.json();
-      content = extractJson(retryResult.choices?.[0]?.message?.content);
-      if (content) {
+      const retryContent = extractJson(retryResult.choices?.[0]?.message?.content);
+      if (retryContent) {
+        content = retryContent;
         result.usage = retryResult.usage || result.usage;
       }
     }
@@ -1257,6 +1262,16 @@ export const generatePlanning = onCall(
     },
   },
   async (request) => {
+    try {
+      return await runGeneratePlanning(request);
+    } catch (error) {
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError('internal', error.message || 'ERROR_INTERNO');
+    }
+  }
+);
+
+async function runGeneratePlanning(request) {
     if (!request.auth) {
       throw new Error('REQUIERE_AUTENTICACION');
     }
@@ -1546,7 +1561,6 @@ export const generatePlanning = onCall(
       ...planning,
     };
   }
-);
 
 export const regenerateSection = onCall(
   { cors: ['https://planificacion-con-ia.web.app'] },
