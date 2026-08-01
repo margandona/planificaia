@@ -11,6 +11,10 @@ initializeApp();
 const db = getFirestore();
 
 const CATALOG = {
+  // Base multi-país (S-7): el catálogo es por país. 'cl' = Chile (default).
+  // Para otro país se crea catalog/<país>-subjects o se parametriza el doc por país.
+  country: 'cl',
+  countryName: 'Chile',
   subjects: [
     { key: 'desarrollo-personal-social', name: 'Desarrollo Personal y Social', icon: '🧒', sort: 1, active: true },
     { key: 'comunicacion-integral', name: 'Comunicación Integral', icon: '🗣️', sort: 2, active: true },
@@ -32,11 +36,11 @@ const CATALOG = {
     { key: 'responsabilidad-personal-social', name: 'Responsabilidad Personal y Social', icon: '🤝', sort: 18, active: true },
     { key: 'pensamiento-computacional', name: 'Pensamiento Computacional', icon: '🤖', sort: 19, active: true },
   ],
-  version: 4,
+  version: 5,
   updatedAt: new Date().toISOString(),
 };
 
 await db.collection('catalog').doc('subjects').set(CATALOG);
-console.log('Catálogo de asignaturas guardado:');
+console.log(`Catálogo guardado (${CATALOG.countryName} - ${CATALOG.country}, v${CATALOG.version}):`);
 CATALOG.subjects.forEach(s => console.log(`  ${s.icon} ${s.key} (${s.name}) - active:${s.active}`));
 process.exit(0);

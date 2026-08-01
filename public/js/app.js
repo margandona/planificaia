@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin } from './core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin } from './core.js';
 
 // Páginas ligeras (carga inicial). Las páginas pesadas viven en /js/pages/*.js
 // y se cargan con import() dinámico (S-5.4).
@@ -180,13 +180,23 @@ const DashboardPage = defineComponent({
     return () => h(Layout, { title: 'Mis Planificaciones' }, () => [
       h('div', { class: 'flex items-center justify-between mb-4' }, [
         h('div', { class: 'flex gap-2' }, filters.map(([v, l]) =>
-          h('button', { class: `px-3 py-1 rounded-full text-sm ${filter.value === v ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`, onClick: () => filter.value = v }, l)
+          h('button', { type: 'button', class: `px-3 py-1 rounded-full text-sm ${filter.value === v ? 'bg-blue-100 text-blue-700 font-medium' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`, onClick: () => filter.value = v }, l)
         )),
         h('div', { class: 'flex gap-2' }, [
           h('a', { href: '#/nueva', class: 'bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition' }, '+ Con IA'),
           h('a', { href: '#/nueva-manual', class: 'bg-white text-blue-600 border border-blue-300 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50 transition' }, '+ Manual'),
         ]),
       ]),
+      !loading.value && plans.value.length === 0 ? Card([h('div', { class: 'p-5 flex flex-col md:flex-row md:items-center gap-4' }, [
+        h('div', { class: 'text-3xl', 'aria-hidden': 'true' }, '🚀'),
+        h('div', { class: 'flex-1' }, [
+          h('h3', { class: 'font-semibold text-slate-800 mb-1' }, 'Primeros pasos'),
+          h('p', { class: 'text-sm text-slate-500' }, 'Crea tu primera planificación con IA o revisa la guía rápida de ayuda.'),
+          h('div', { class: 'flex gap-2 mt-2' }, [
+            h('a', { href: '#/ayuda', class: 'text-sm text-blue-600 hover:underline' }, 'Ver Ayuda y tutoriales'),
+          ]),
+        ]),
+      ])]) : null,
       loading.value ? h('div', { class: 'flex justify-center py-12' }, Spinner(8)) :
         filtered.value.length === 0 ? EmptyState('📋', filter.value === 'all' ? 'No tienes planificaciones' : 'No hay planificaciones en este estado', filter.value === 'all' ? 'Crea tu primera planificación con IA' : 'Cambia el filtro o crea una nueva', filter.value === 'all' ? h('a', { href: '#/nueva', class: 'mt-3 inline-block bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700' }, 'Crear primera planificación') : null) :
           h('div', { class: 'grid gap-3' }, filtered.value.map(p =>
@@ -260,6 +270,17 @@ const ProfilePage = defineComponent({
         store.user = null; go('/');
       } catch (e) { error.value = 'Error al eliminar cuenta'; } finally { saving.value = false; }
     };
+
+    const myPlan = computed(() => (store.profile?.plan === 'pro' ? 'pro' : 'free'));
+    const newPlan = ref(myPlan.value);
+    const setPlan = async () => {
+      saving.value = true; error.value = ''; success.value = '';
+      try {
+        await setUserPlanFn({ targetUid: store.user.uid, plan: newPlan.value });
+        if (store.profile) store.profile.plan = newPlan.value; else store.profile = { plan: newPlan.value };
+        success.value = `Plan actualizado a ${PLANS[newPlan.value].label}`;
+      } catch (e) { error.value = e.message === 'ACCESO_NO_AUTORIZADO' ? 'No tienes permisos para cambiar planes.' : 'Error al actualizar el plan'; } finally { saving.value = false; }
+    };
     const levels = LEVELS;
 
     return () => h(Layout, { title: 'Mi Perfil' }, () => [
@@ -275,6 +296,18 @@ const ProfilePage = defineComponent({
           h('button', { type: 'submit', disabled: saving.value, class: 'bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, saving.value ? 'Guardando...' : 'Guardar cambios'),
         ])]),
       h('div', { class: 'mt-6' }, Card([h('div', { class: 'p-6' }, [
+        h('div', { class: 'flex items-center gap-2 mb-1' }, [
+          h('h3', { class: 'text-base font-semibold text-slate-800' }, 'Mi Plan'),
+          h('span', { class: 'text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium' }, planLabel()),
+        ]),
+        h('p', { class: 'text-sm text-slate-500 mb-3' }, `Límite diario: ${PLANS[myPlan.value].dailyGenerations} generaciones con IA. El plan Pro está pensado para equipos e instituciones (piloto).`),
+        isAdmin() ? h('div', { class: 'flex items-center gap-2' }, [
+          h('label', { class: 'sr-only', for: 'perfil-plan' }, 'Seleccionar plan'),
+          h('select', { id: 'perfil-plan', value: newPlan.value, onInput: (e) => newPlan.value = e.target.value, class: 'w-48 border border-slate-300 rounded-lg px-3 py-2' }, [h('option', { value: 'free' }, 'Gratis (10/día)'), h('option', { value: 'pro' }, 'Pro (1000/día)')]),
+          h('button', { type: 'button', onClick: setPlan, disabled: saving.value, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, 'Cambiar plan'),
+        ]) : h('p', { class: 'text-xs text-slate-400' }, 'Para el plan Pro institucional, contacta a hola@planificaia.cl.'),
+      ])])),
+      h('div', { class: 'mt-6' }, Card([h('div', { class: 'p-6' }, [
         h('h3', { class: 'text-base font-semibold text-red-600 mb-1' }, 'Eliminar cuenta'),
         h('p', { class: 'text-sm text-slate-500 mb-3' }, 'Exportaremos tus planificaciones antes de eliminar. Esta acción no se puede deshacer.'),
         h('button', { type: 'button', onClick: deleteAccount, disabled: saving.value, class: 'bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition' }, 'Eliminar mi cuenta'),
@@ -282,6 +315,45 @@ const ProfilePage = defineComponent({
     ]);
   }
 });
+
+// ──────────── Onboarding / Ayuda (S-7) ────────────
+
+const HelpSection = (heading, children) => h('section', { class: 'space-y-2' }, [
+  h('h3', { class: 'text-base font-semibold text-slate-800' }, heading),
+  ...children,
+]);
+
+const AyudaPage = () => h(Layout, { title: 'Ayuda y Primeros Pasos' }, () => [
+  h('div', { class: 'max-w-3xl text-sm text-slate-600 space-y-8' }, [
+    HelpSection('1. Crea tu primera planificación', [
+      h('p', 'Ingresa a "Dashboard" y pulsa "+ Con IA". El asistente te guía en 10 pasos: tipo de planificación, nivel, asignatura, objetivos de aprendizaje, contexto, metodología, estructura, evaluación e inclusión. Al final se genera un borrador que puedes editar, regenerar por secciones y aprobar.'),
+      h('p', ['Tip: en el paso 2 puedes filtrar los OA por eje/unidad y buscar por texto o código con la barra de búsqueda.',]),
+    ]),
+    HelpSection('2. Tipos de planificación', [
+      h('ul', { class: 'list-disc list-inside space-y-1' }, [
+        h('li', 'Clase: una sesión (inicio, desarrollo, cierre).'),
+        h('li', 'Unidad didáctica: 4 a 8 clases con secuencia y evaluación.'),
+        h('li', 'Mensual: semanas y distribución de OA.'),
+        h('li', 'Anual: meses y cobertura del año lectivo.'),
+        h('li', 'Evaluación: instrumentos, rúbricas e indicadores (Decreto 67).'),
+        h('li', 'Multigrado: combina dos niveles en una misma planificación.'),
+      ]),
+    ]),
+    HelpSection('3. Uso ético de la IA', [
+      h('p', 'La IA propone, el sistema verifica y el docente decide. Las planificaciones son borradores que debes revisar, adaptar a tu contexto y aprobar antes de usar. No ingreses datos personales de estudiantes.'),
+    ]),
+    HelpSection('4. Colabora con tu equipo', [
+      h('p', 'Si tu establecimiento usa PlanificaIA, crea o únete a un colegio desde "Institucional": podrás invitar docentes, revisar la biblioteca compartida y aprobar planificaciones como UTP (coordinador).'),
+    ]),
+    HelpSection('5. Preguntas frecuentes', [
+      h('ul', { class: 'list-disc list-inside space-y-1' }, [
+        h('li', '¿Puedo exportar? Sí, cada planificación se exporta a PDF y DOCX con la declaración de IA.'),
+        h('li', '¿Límite diario? El plan Gratis permite 10 generaciones diarias; el Pro, 1000.'),
+        h('li', '¿Cómo recupero mi contraseña? En "Iniciar sesión" pulsa "¿Olvidaste tu contraseña?".'),
+      ]),
+    ]),
+  ]),
+]);
 
 // ──────────── Páginas legales (S-6: Ley 19.628 / Ley 21.719, RF-013) ────────────
 
@@ -406,6 +478,7 @@ async function resolveRoute() {
     '/verificar-email': VerifyEmailPage,
     '/dashboard': DashboardPage,
     '/perfil': ProfilePage,
+    '/ayuda': AyudaPage,
     '/privacidad': PrivacyPage,
     '/terminos': TermsPage,
   };

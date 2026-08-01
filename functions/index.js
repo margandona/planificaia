@@ -49,6 +49,19 @@ const DEFAULT_LIMITS = {
   requestTimeoutMs: 30000,
 };
 
+// ─── Planes freemium (S-7) ───
+// free: 10 generaciones/día (límite por defecto). pro: prácticamente ilimitado.
+// El upgrade lo gestiona setUserPlan (admin-only); el cobro real es un piloto
+// institucional — ver MODELO_NEGOCIO.md.
+const PLANS = {
+  free: { label: 'Gratis', dailyGenerations: 10 },
+  pro: { label: 'Pro', dailyGenerations: 1000 },
+};
+
+function getUserPlan(userDoc = {}) {
+  return userDoc.plan === 'pro' ? 'pro' : 'free';
+}
+
 // Presupuesto mensual de IA: soft limit al 80% (kill-switch solo de generación).
 // MONTHLY_BUDGET_USD se define en functions/.env (deploy escribe desde GitHub secrets).
 const MONTHLY_BUDGET_USD = Number(process.env.MONTHLY_BUDGET_USD || 100);
@@ -1256,7 +1269,10 @@ export const generatePlanning = onCall(
     const today = new Date().toISOString().split('T')[0];
     const startTime = Date.now();
 
-    // 1. Validar límite diario
+    // 1. Validar límite diario según plan (S-7 freemium).
+    const userSnap = await db.collection('users').doc(userId).get();
+    const plan = getUserPlan(userSnap.exists ? userSnap.data() : {});
+    const dailyLimit = PLANS[plan].dailyGenerations;
     const costSnapshot = await db
       .collection('ai-costs')
       .where('userId', '==', userId)
@@ -1264,7 +1280,7 @@ export const generatePlanning = onCall(
       .count()
       .get();
 
-    if (costSnapshot.data().count >= DEFAULT_LIMITS.dailyGenerations) {
+    if (costSnapshot.data().count >= dailyLimit) {
       throw new Error('LIMITE_DIARIO_ALCANZADO');
     }
 
@@ -1761,6 +1777,23 @@ export const setUserRole = onCall(
       userId: request.auth.uid, action: 'set-role', resource: 'user', resourceId: targetUid, role, createdAt: new Date().toISOString(),
     });
     return { success: true, role };
+  }
+);
+
+// Asigna el plan freemium de un usuario (S-7). Solo admin. Deja trazabilidad.
+export const setUserPlan = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    if (request.auth.token.admin !== true) throw new Error('ACCESO_NO_AUTORIZADO');
+    const { targetUid, plan } = request.data || {};
+    if (!targetUid || !['free', 'pro'].includes(plan)) throw new Error('DATOS_INVALIDOS');
+    const now = new Date().toISOString();
+    await db.collection('users').doc(targetUid).set({ plan, updatedAt: now }, { merge: true });
+    await db.collection('audit-logs').add({
+      userId: request.auth.uid, action: 'set-plan', resource: 'user', resourceId: targetUid, plan, createdAt: now,
+    });
+    return { success: true, plan };
   }
 );
 

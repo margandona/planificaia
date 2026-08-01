@@ -210,7 +210,7 @@ def test_accessibility():
 def test_axe_accessibility():
     # Auditoría WCAG 2.2 AA (S-6, RNF-001) con axe-core sobre rutas públicas.
     axe_src = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
-    routes = ['', '/#/login', '/#/registro', '/#/privacidad', '/#/terminos']
+    routes = ['', '/#/login', '/#/registro', '/#/ayuda', '/#/privacidad', '/#/terminos']
     all_violations = []
 
     p = sync_playwright().start()
@@ -243,7 +243,7 @@ def test_axe_accessibility():
     browser.close()
     p.stop()
     ok = len(all_violations) == 0
-    report("Axe WCAG 2.2 AA", ok, f"violations: {all_violations}" if all_violations else "0 violaciones en 5 rutas")
+    report("Axe WCAG 2.2 AA", ok, f"violations: {all_violations}" if all_violations else "0 violaciones en 6 rutas")
 
 
 def test_mobile_responsive():
@@ -285,7 +285,7 @@ def test_no_console_errors():
     browser = p.chromium.launch(headless=True)
     all_errors = []
 
-    for route in ['', '/#/login', '/#/registro', '/#/privacidad', '/#/terminos']:
+    for route in ['', '/#/login', '/#/registro', '/#/ayuda', '/#/privacidad', '/#/terminos']:
         page = browser.new_page()
         errors = []
         page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' else None)

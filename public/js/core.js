@@ -123,7 +123,16 @@ const store = reactive({
   loading: false,
   error: null,
   subjects: DEFAULT_SUBJECTS, // catálogo dinámico desde Firestore (fallback a defaults)
+  country: 'cl',
+  countryName: 'Chile',
 });
+
+const PLANS = {
+  free: { label: 'Gratis', dailyGenerations: 10 },
+  pro: { label: 'Pro', dailyGenerations: 1000 },
+};
+
+const planLabel = () => (store.profile?.plan === 'pro' ? 'Pro' : 'Gratis');
 
 const generatePlanningFn = httpsCallable(fx, 'generatePlanning');
 const regenerateSectionFn = httpsCallable(fx, 'regenerateSection');
@@ -136,6 +145,7 @@ const inviteMemberFn = httpsCallable(fx, 'inviteMember');
 const acceptInviteFn = httpsCallable(fx, 'acceptInvite');
 const removeMemberFn = httpsCallable(fx, 'removeMember');
 const acceptTermsFn = httpsCallable(fx, 'acceptTerms');
+const setUserPlanFn = httpsCallable(fx, 'setUserPlan');
 
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
@@ -196,15 +206,19 @@ async function loadSubjectCatalog() {
       const parsed = JSON.parse(cached);
       if (parsed.expires > Date.now() && parsed.subjects?.length) {
         store.subjects = parsed.subjects;
+        store.country = parsed.country || 'cl';
+        store.countryName = parsed.countryName || 'Chile';
         return;
       }
     }
     const snap = await getDoc(doc(db, 'catalog', 'subjects'));
     if (snap.exists()) {
       const data = snap.data();
+      store.country = data.country || 'cl';
+      store.countryName = data.countryName || 'Chile';
       if (Array.isArray(data.subjects) && data.subjects.length) {
         store.subjects = data.subjects;
-        try { localStorage.setItem(cacheKey, JSON.stringify({ subjects: data.subjects, expires: Date.now() + 7 * 24 * 60 * 60 * 1000 })); } catch (e) {}
+        try { localStorage.setItem(cacheKey, JSON.stringify({ subjects: data.subjects, country: data.country, countryName: data.countryName, expires: Date.now() + 7 * 24 * 60 * 60 * 1000 })); } catch (e) {}
       }
     }
   } catch (e) {
@@ -308,7 +322,8 @@ const Layout = defineComponent({
       // Footer
       h('footer', { class: 'bg-white border-t border-slate-200 mt-auto py-6', role: 'contentinfo' }, [
         h('div', { class: 'max-w-7xl mx-auto px-4 text-center text-xs text-slate-500 space-x-4' }, [
-          h('span', '© 2026 PlanificaIA — MaKuaZ'),
+          h('span', `© 2026 PlanificaIA — MaKuaZ · Currículum oficial de ${store.countryName}`),
+          h('a', { href: '#/ayuda', class: 'hover:text-slate-700 underline' }, 'Ayuda'),
           h('a', { href: '#/privacidad', class: 'hover:text-slate-700 underline' }, 'Privacidad'),
           h('a', { href: '#/terminos', class: 'hover:text-slate-700 underline' }, 'Términos'),
         ]),
@@ -318,4 +333,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin };

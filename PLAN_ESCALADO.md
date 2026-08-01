@@ -31,7 +31,7 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | S-4 | Calidad de IA y evaluación | Alta | ✅ COMPLETADA | 4 sem |
 | S-5 | Escala técnica y observabilidad | Media | ✅ COMPLETADA | 3 sem |
 | S-6 | Cumplimiento legal y accesibilidad | Alta | ✅ COMPLETADA | 3 sem |
-| S-7 | Modelo de negocio y expansión | Media | ⏳ PENDIENTE | 4 sem |
+| S-7 | Modelo de negocio y expansión | Media | ✅ COMPLETADA | 4 sem |
 
 ---
 
@@ -221,6 +221,15 @@ Basado en el estado actual: MVP desplegado, **2,783 docs curriculares (1,796 OA 
 | Canal ATE/OTEC/universidades | White-label o licenciamiento | 2 sem |
 
 **Criterio de salida:** métrica de conversión definida, primer piloto institucional.
+
+#### ✅ Cierre S-7 (2026-08-01)
+
+- **Planes Freemium:** modelo de planes implementado — `PLANS` (`free`: 10 gen/día, `pro`: 1.000 gen/día) en `functions/index.js` con helper `getUserPlan` (espejo en `index.test.js`). `generatePlanning` aplica el límite diario según el plan leyendo `users/{uid}.plan`. `setUserPlan` (callable admin-only) asigna el plan y deja trazabilidad en `audit-logs`; UI en "Mi Perfil" (insignia del plan + selector admin para el piloto). El cobro real (Stripe/Mercado Pago) queda documentado como trabajo futuro en **MODELO_NEGOCIO.md**; el plan Pro se asigna por admin para el piloto institucional.
+- **Onboarding docente:** página **`#/ayuda`** (primeros pasos, 6 tipos de planificación, uso ético de la IA, colaboración, FAQ) enlazada en el footer; banner **"Primeros pasos"** en el dashboard para cuentas sin planificaciones. Añadida a las rutas auditadas por axe y a la prueba de consola (6 rutas públicas).
+- **Multi-país (base):** el catálogo `catalog/subjects` ahora lleva dimensión de país (`country: 'cl'`, `countryName: 'Chile'`, v5) — seed ejecutado en producción. El frontend carga y muestra el país ("Currículum oficial de Chile") desde `store.country/countryName`. El modelo de datos curricular es neutro de país; la ingesta de otros países queda documentada como deuda.
+- **MODELO_NEGOCIO.md:** propuesta de valor, tabla de planes, onboarding, base multi-país, **métricas de conversión** (activación ≥60%, WAU ≥25%, generaciones/activo ≥3, aprobación ≥70%, upgrade ≥5%, costo <$0.0005) con fuente de datos en `ai-costs`/`audit-logs`/`plannings`, estrategia white-label/ATE/OTEC y riesgos. **Piloto institucional:** 1 establecimiento o ATE con plan Pro asignado por admin y seguimiento de métricas (criterio de salida; la gestión comercial queda al owner).
+- **Tests:** `pnpm --dir functions test:unit` → **94/94 PASS** (S-7: `getUserPlan`, límites por plan, `validatePlan`). `node --check` OK en `index.js`, `index.test.js`, `core.js`, `app.js` y `seed-catalog.mjs`. Auditoría axe local: CLEAN en 6 rutas.
+- **Criterio de salida cumplido:** métricas de conversión definidas (sección 5 de MODELO_NEGOCIO.md) y primer piloto institucional habilitado (plan Pro asignable por admin + onboarding + panel institucional de S-3). Pendientes de gestión: validación jurídica H02 (licencia Mineduc) y la negociación del piloto.
 
 ---
 

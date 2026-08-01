@@ -1356,3 +1356,41 @@ describe('S-6 Cumplimiento legal y accesibilidad', () => {
     expect(validateTermsAcceptance({ version: TERMS_VERSION, privacyVersion: '2020-01-01' })).toBe('VERSION_PRIVACIDAD_DESACTUALIZADA');
   });
 });
+
+// Espejo de helpers S-7 (patrón del repo: index.test.js duplica la lógica).
+const PLANS = {
+  free: { label: 'Gratis', dailyGenerations: 10 },
+  pro: { label: 'Pro', dailyGenerations: 1000 },
+};
+
+function getUserPlan(userDoc = {}) {
+  return userDoc.plan === 'pro' ? 'pro' : 'free';
+}
+
+function validatePlan(data) {
+  if (!data || typeof data.targetUid !== 'string') return 'DATOS_INVALIDOS';
+  if (!['free', 'pro'].includes(data.plan)) return 'DATOS_INVALIDOS';
+  return null;
+}
+
+describe('S-7 Modelo de negocio', () => {
+  test('getUserPlan usa free por defecto y pro solo cuando está asignado', () => {
+    expect(getUserPlan()).toBe('free');
+    expect(getUserPlan({ plan: 'free' })).toBe('free');
+    expect(getUserPlan({ plan: 'pro' })).toBe('pro');
+  });
+
+  test('el plan pro tiene límite diario mucho mayor que free', () => {
+    expect(PLANS.free.dailyGenerations).toBe(10);
+    expect(PLANS.pro.dailyGenerations).toBe(1000);
+    expect(PLANS.pro.dailyGenerations).toBeGreaterThan(PLANS.free.dailyGenerations);
+  });
+
+  test('validatePlan solo admite free o pro con targetUid', () => {
+    expect(validatePlan({ targetUid: 'abc', plan: 'pro' })).toBeNull();
+    expect(validatePlan({ targetUid: 'abc', plan: 'free' })).toBeNull();
+    expect(validatePlan({ targetUid: 'abc', plan: 'enterprise' })).toBe('DATOS_INVALIDOS');
+    expect(validatePlan({ plan: 'pro' })).toBe('DATOS_INVALIDOS');
+    expect(validatePlan(null)).toBe('DATOS_INVALIDOS');
+  });
+});
