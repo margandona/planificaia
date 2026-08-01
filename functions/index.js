@@ -108,9 +108,52 @@ const PLANNING_TYPES = {
   multigrade: { label: 'Multigrado', minOA: 1, maxOA: 6 },
 };
 
+// Type-aware: cada tipo guarda sus actividades/evaluación en estructuras distintas
+// (unit→unit.classes[].activities, monthly→unit.weeks[].activities, annual→unit.months
+// sin actividades, evaluation→evaluation.*, el resto→activities/assessment raíz).
+const hasPlannedActivities = (p) => {
+  if (p.type === 'evaluation') return (p.evaluation?.indicators?.length || 0) > 0;
+  if (p.type === 'unit') return (p.unit?.classes || []).every(c => (c.activities || []).length > 0);
+  if (p.type === 'monthly') return (p.unit?.weeks || []).every(w => (w.activities || []).length > 0);
+  if (p.type === 'annual') return true; // anual distribuye OA por meses, sin actividades
+  return (p.activities?.length || 0) > 0;
+};
+
+const hasAssessmentCriteria = (p) => {
+  if (p.type === 'evaluation') return (p.evaluation?.criteria?.length || 0) > 0;
+  if (p.type === 'unit') {
+    const classes = p.unit?.classes || [];
+    return (p.unit?.assessment?.criteria || []).length > 0
+      || classes.some(c => (c.assessment?.criteria || []).length > 0);
+  }
+  if (p.type === 'monthly') {
+    const weeks = p.unit?.weeks || [];
+    return (p.unit?.assessment?.criteria || []).length > 0
+      || weeks.some(w => (w.assessment?.criteria || []).length > 0);
+  }
+  if (p.type === 'annual') return (p.unit?.assessment?.criteria || []).length > 0;
+  return (p.assessment?.criteria?.length || 0) > 0;
+};
+
+const hasFeedbackStrategy = (p) => {
+  if (p.type === 'evaluation') return String(p.evaluation?.feedbackStrategy || '').trim().length > 0;
+  if (p.type === 'unit') {
+    const classes = p.unit?.classes || [];
+    return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0
+      || classes.some(c => String(c.assessment?.feedbackStrategy || '').trim().length > 0);
+  }
+  if (p.type === 'monthly') {
+    const weeks = p.unit?.weeks || [];
+    return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0
+      || weeks.some(w => String(w.assessment?.feedbackStrategy || '').trim().length > 0);
+  }
+  if (p.type === 'annual') return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0;
+  return String(p.assessment?.feedbackStrategy || '').trim().length > 0;
+};
+
 const VALIDATION_RULES = [
-  { id: 'V-001', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.indicators?.length > 0) : (p.activities?.length > 0) },
-  { id: 'V-004', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.criteria?.length > 0) : (p.assessment?.criteria?.length > 0) },
+  { id: 'V-001', type: 'critical', check: hasPlannedActivities },
+  { id: 'V-004', type: 'critical', check: hasAssessmentCriteria },
   { id: 'V-007', type: 'warning', check: (p) => {
     if (p.type === 'unit') return p.unit?.classes?.length > 0 && p.unit.classes.some(c => c.activities?.some(a => a.moment === 'cierre'));
     if (p.type === 'monthly') return p.unit?.weeks?.length > 0;
@@ -118,7 +161,7 @@ const VALIDATION_RULES = [
     if (p.type === 'evaluation') return (p.evaluation?.rubric?.length > 0) || (p.evaluation?.instrument?.length > 0);
     return p.activities?.some(a => a.moment === 'cierre');
   }},
-  { id: 'V-009', type: 'warning', check: (p) => p.type === 'evaluation' ? (p.evaluation?.feedbackStrategy?.length > 0) : (p.assessment?.feedbackStrategy?.length > 0) },
+  { id: 'V-009', type: 'warning', check: hasFeedbackStrategy },
   { id: 'V-006', type: 'warning', check: (p) => {
     if (p.type === 'unit') {
       const first = p.unit?.classes?.[0];

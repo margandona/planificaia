@@ -17,9 +17,51 @@ const PLANNING_TYPES = {
   multigrade: { label: 'Multigrado', minOA: 1, maxOA: 6 },
 };
 
+// Espejo de las reglas de VALIDATION_RULES de index.js (type-aware).
+// Cada tipo guarda actividades/evaluación en estructuras distintas.
+const hasPlannedActivities = (p) => {
+  if (p.type === 'evaluation') return (p.evaluation?.indicators?.length || 0) > 0;
+  if (p.type === 'unit') return (p.unit?.classes || []).every(c => (c.activities || []).length > 0);
+  if (p.type === 'monthly') return (p.unit?.weeks || []).every(w => (w.activities || []).length > 0);
+  if (p.type === 'annual') return true; // anual distribuye OA por meses, sin actividades
+  return (p.activities?.length || 0) > 0;
+};
+
+const hasAssessmentCriteria = (p) => {
+  if (p.type === 'evaluation') return (p.evaluation?.criteria?.length || 0) > 0;
+  if (p.type === 'unit') {
+    const classes = p.unit?.classes || [];
+    return (p.unit?.assessment?.criteria || []).length > 0
+      || classes.some(c => (c.assessment?.criteria || []).length > 0);
+  }
+  if (p.type === 'monthly') {
+    const weeks = p.unit?.weeks || [];
+    return (p.unit?.assessment?.criteria || []).length > 0
+      || weeks.some(w => (w.assessment?.criteria || []).length > 0);
+  }
+  if (p.type === 'annual') return (p.unit?.assessment?.criteria || []).length > 0;
+  return (p.assessment?.criteria?.length || 0) > 0;
+};
+
+const hasFeedbackStrategy = (p) => {
+  if (p.type === 'evaluation') return String(p.evaluation?.feedbackStrategy || '').trim().length > 0;
+  if (p.type === 'unit') {
+    const classes = p.unit?.classes || [];
+    return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0
+      || classes.some(c => String(c.assessment?.feedbackStrategy || '').trim().length > 0);
+  }
+  if (p.type === 'monthly') {
+    const weeks = p.unit?.weeks || [];
+    return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0
+      || weeks.some(w => String(w.assessment?.feedbackStrategy || '').trim().length > 0);
+  }
+  if (p.type === 'annual') return String(p.unit?.assessment?.feedbackStrategy || '').trim().length > 0;
+  return String(p.assessment?.feedbackStrategy || '').trim().length > 0;
+};
+
 const VALIDATION_RULES = [
-  { id: 'V-001', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.indicators?.length > 0) : (p.activities?.length > 0) },
-  { id: 'V-004', type: 'critical', check: (p) => p.type === 'evaluation' ? (p.evaluation?.criteria?.length > 0) : (p.assessment?.criteria?.length > 0) },
+  { id: 'V-001', type: 'critical', check: hasPlannedActivities },
+  { id: 'V-004', type: 'critical', check: hasAssessmentCriteria },
   { id: 'V-007', type: 'warning', check: (p) => {
     if (p.type === 'unit') return p.unit?.classes?.length > 0 && p.unit.classes.some(c => c.activities?.some(a => a.moment === 'cierre'));
     if (p.type === 'monthly') return p.unit?.weeks?.length > 0;
@@ -27,7 +69,7 @@ const VALIDATION_RULES = [
     if (p.type === 'evaluation') return (p.evaluation?.rubric?.length > 0) || (p.evaluation?.instrument?.length > 0);
     return p.activities?.some(a => a.moment === 'cierre');
   }},
-  { id: 'V-009', type: 'warning', check: (p) => p.type === 'evaluation' ? (p.evaluation?.feedbackStrategy?.length > 0) : (p.assessment?.feedbackStrategy?.length > 0) },
+  { id: 'V-009', type: 'warning', check: hasFeedbackStrategy },
   {
     id: 'V-006', type: 'warning', check: (p) => {
       if (p.type === 'unit') {
@@ -845,6 +887,57 @@ describe('Pedagogical Audit Rules (V-001 to V-012)', () => {
     expect(warnings.some(w => w.ruleId === 'V-007')).toBe(false);
     expect(warnings.some(w => w.ruleId === 'V-001')).toBe(false);
     expect(warnings.some(w => w.ruleId === 'V-004')).toBe(false);
+  });
+
+  test('unidad completa con clases y evaluacion no genera V-001 ni V-004 ni V-009', () => {
+    const warnings = runPedagogicalAudit({
+      type: 'unit',
+      unit: {
+        classes: [
+          { activities: [{ moment: 'inicio', duration: 15, description: 'Activar conocimientos previos' }, { moment: 'desarrollo', duration: 50, description: 'Trabajar en equipos' }, { moment: 'cierre', duration: 25, description: 'Compartir conclusiones' }], assessment: { criteria: ['Identifica'], feedbackStrategy: 'Oral' } },
+        ],
+        assessment: { criteria: ['Criterio unidad'], feedbackStrategy: 'Retroalimentación grupal' },
+      },
+      duration: 90,
+    });
+    expect(warnings.some(w => w.ruleId === 'V-001')).toBe(false);
+    expect(warnings.some(w => w.ruleId === 'V-004')).toBe(false);
+    expect(warnings.some(w => w.ruleId === 'V-009')).toBe(false);
+  });
+
+  test('mensual completa con semanas y evaluacion no genera V-001 ni V-004 ni V-009', () => {
+    const warnings = runPedagogicalAudit({
+      type: 'monthly',
+      unit: {
+        weeks: [
+          { activities: [{ moment: 'inicio', duration: 30, description: 'Introduccion al tema de la semana' }, { moment: 'desarrollo', duration: 100, description: 'Desarrollar la actividad principal de la semana' }, { moment: 'cierre', duration: 50, description: 'Sintetizar los aprendizajes de la semana' }], assessment: { criteria: ['Logra'], feedbackStrategy: 'Escrita' } },
+        ],
+        assessment: { criteria: ['Criterio mensual'], feedbackStrategy: 'Retroalimentación formativa' },
+      },
+      duration: 90,
+    });
+    expect(warnings.some(w => w.ruleId === 'V-001')).toBe(false);
+    expect(warnings.some(w => w.ruleId === 'V-004')).toBe(false);
+    expect(warnings.some(w => w.ruleId === 'V-009')).toBe(false);
+  });
+
+  test('unidad sin actividades en ninguna clase genera V-001', () => {
+    const warnings = runPedagogicalAudit({
+      type: 'unit',
+      unit: { classes: [{ activities: [] }], assessment: { criteria: ['A'] } },
+      duration: 45,
+    });
+    expect(warnings.some(w => w.ruleId === 'V-001')).toBe(true);
+  });
+
+  test('mensual sin semanas no genera V-001 (anual/mensual distribuyen por bloques)', () => {
+    const warnings = runPedagogicalAudit({ type: 'monthly', unit: { weeks: [] }, duration: 45 });
+    expect(warnings.some(w => w.ruleId === 'V-001')).toBe(false);
+  });
+
+  test('anual no genera V-001 aunque no tenga actividades', () => {
+    const warnings = runPedagogicalAudit({ type: 'annual', unit: { months: [{ name: 'Marzo' }] } });
+    expect(warnings.some(w => w.ruleId === 'V-001')).toBe(false);
   });
 });
 
