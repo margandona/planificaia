@@ -80,7 +80,7 @@ const ManualEditor = defineComponent({
       if (isEditing) {
         try {
           const snap = await getDoc(doc(db, 'plannings', id));
-          if (!snap.exists || snap.data().userId !== store.user.uid) {
+          if (!snap.exists() || snap.data().userId !== store.user.uid) {
             error.value = 'Planificación no encontrada';
             return;
           }

@@ -95,7 +95,7 @@ const WizardPage = defineComponent({
             levels: data.type === 'multigrade' ? [data.level, data.level2] : null,
             subject: data.subject,
             numClasses: data.type === 'class' ? undefined : data.numClasses,
-            evaluationType: data.type === 'evaluation' ? data.evaluationType : undefined,
+            evaluationType: data.type === 'annual' ? undefined : data.evaluationType,
             instrument: data.type === 'evaluation' ? data.instrument : undefined,
             duration: parseInt(data.duration),
             modality: data.modality,
@@ -310,7 +310,7 @@ const WizardPage = defineComponent({
     const step6 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
       h('h2', { class: 'text-lg font-semibold' }, data.type === 'annual' ? 'Evaluación Anual' : 'Evaluación'),
       h('p', { class: 'text-sm text-slate-500' }, data.type === 'annual' ? 'La evaluación anual se define dentro de la distribución. Continúa para configurar la inclusión.' : 'Define el enfoque de evaluación (Decreto N.° 67)'),
-      data.type === 'annual' ? null : h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2' }, [h('option', { value: 'formativa' }, 'Evaluación Formativa'), h('option', { value: 'sumativa' }, 'Evaluación Sumativa')]),
+      data.type === 'annual' ? null : h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', value: data.evaluationType, onChange: (e) => data.evaluationType = e.target.value }, [h('option', { value: 'formativa' }, 'Evaluación Formativa'), h('option', { value: 'sumativa' }, 'Evaluación Sumativa')]),
       h('button', { onClick: () => step.value = 7, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 

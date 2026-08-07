@@ -15,16 +15,21 @@ const PlanningDetailPage = defineComponent({
         comments.value = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       } catch (e) { /* ignore */ }
     };
+    const loadPlanning = async () => {
+      const snap = await getDoc(doc(db, 'plannings', id));
+      if (!snap.exists()) { error.value = 'Planificación no encontrada'; return; }
+      const data = snap.data();
+      const sameOrg = data.orgId && store.org && data.orgId === store.org.id;
+      if (data.userId !== store.user.uid && !sameOrg) { error.value = 'No tienes acceso a esta planificación'; return; }
+      isOwnerView.value = data.userId === store.user.uid;
+      planning.value = { id: snap.id, ...data };
+      loadComments();
+    };
+
     onMounted(async () => {
       try {
-        const snap = await getDoc(doc(db, 'plannings', id));
-        if (!snap.exists) { error.value = 'Planificaci�n no encontrada'; return; }
-        const data = snap.data();
-        const sameOrg = data.orgId && store.org && data.orgId === store.org.id;
-        if (data.userId !== store.user.uid && !sameOrg) { error.value = 'No tienes acceso a esta planificaci�n'; return; }
-        isOwnerView.value = data.userId === store.user.uid;
-        planning.value = { id: snap.id, ...data };
-        loadComments();
+        loading.value = true;
+        await loadPlanning();
       } catch (e) { error.value = 'Error al cargar planificación'; } finally { loading.value = false; }
     });
 
@@ -109,6 +114,54 @@ const PlanningDetailPage = defineComponent({
         commentError.value = 'No se pudo enviar el comentario.';
       } finally { addingComment.value = false; }
     };
+
+    // B8: regeneración por sección.
+    const regenSection = ref('purpose');
+    const regenDraft = ref(null);
+    const regening = ref(false);
+    const regenError = ref('');
+    const sectionOptions = () => {
+      const t = planning.value && planning.value.type;
+      if (t === 'unit') return [['purpose', 'Propósito'], ['unit.classes', 'Clases'], ['unit.assessment', 'Evaluación de unidad']];
+      if (t === 'monthly') return [['purpose', 'Propósito'], ['unit.weeks', 'Semanas'], ['unit.assessment', 'Evaluación del mes']];
+      if (t === 'annual') return [['purpose', 'Propósito'], ['unit.months', 'Mes del año']];
+      if (t === 'evaluation') return [['purpose', 'Propósito'], ['evaluation', 'Evaluación']];
+      if (t === 'multigrade') return [['purpose', 'Propósito'], ['activities', 'Actividades'], ['differentiation', 'Diferenciación']];
+      return [['purpose', 'Propósito'], ['activities', 'Actividades'], ['assessment', 'Evaluación'], ['differentiation', 'Diferenciación'], ['resources', 'Recursos']];
+    };
+    const startRegen = async () => {
+      regenError.value = '';
+      const section = regenSection.value;
+      const confirmed = window.confirm('Regenerar esta sección con IA? El borrador se mostrará para que la aceptes o rechaces antes de guardar.');
+      if (!confirmed) return;
+      regening.value = true;
+      try {
+        const res = await regenerateSectionFn({ planningId: planning.value.id, section });
+        regenDraft.value = res.data;
+      } catch (e) {
+        regenError.value = e.message || 'No se pudo regenerar la sección.';
+      } finally { regening.value = false; }
+    };
+    const acceptDraft = async () => {
+      const section = regenDraft.value.section;
+      const content = regenDraft.value.content;
+      regenError.value = '';
+      regening.value = true;
+      try {
+        if (typeof content === 'string') {
+          planning.value[section] = content;
+        } else if (section.startsWith('unit.') && planning.value.unit) {
+          planning.value.unit[section.replace('unit.', '')] = content;
+        } else {
+          planning.value[section] = content;
+        }
+        planning.value.version = (planning.value.version || 1) + 1;
+        regenDraft.value = null;
+        await loadPlanning();
+      } catch (e) { regenError.value = e.message || 'No se pudo guardar.'; }
+      finally { regening.value = false; }
+    };
+    const rejectDraft = () => { regenDraft.value = null; };
 
     return () => h(Layout, { title: 'Detalle de Planificación' }, () => [
       loading.value ? h('div', { class: 'flex justify-center py-12' }, Spinner(8)) :
@@ -203,6 +256,29 @@ const PlanningDetailPage = defineComponent({
             ])
           )),
         ])]) : null,
+        planning.value.quality ? Card([h('div', { class: 'p-4' }, [
+          h('div', { class: 'flex items-center gap-2 text-sm font-medium text-slate-800 mb-2' }, [
+            h('span', '⭐'),
+            h('span', 'Calidad y coherencia'),
+          ]),
+          h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-2' }, [
+            h('div', { class: 'border border-slate-200 rounded-lg p-3' }, [
+              h('p', { class: 'text-xs font-medium text-slate-600 mb-1' }, 'Calidad (rúbrica interna)'),
+              h('div', { class: 'flex items-center gap-2' }, [
+                h('span', { class: 'text-lg font-bold ' + (planning.value.quality.score >= 4 ? 'text-green-600' : planning.value.quality.score >= 2.5 ? 'text-amber-600' : 'text-red-600') }, (planning.value.quality.score ?? 0).toFixed(1)),
+                h('span', { class: 'text-xs text-slate-500' }, '/ 5 ' + (planning.value.quality.verdict || '')),
+              ]),
+            ]),
+            planning.value.coherenceReview ? h('div', { class: 'border border-slate-200 rounded-lg p-3' }, [
+              h('p', { class: 'text-xs font-medium text-slate-600 mb-1' }, 'Revisión de coherencia (IA)'),
+              h('div', { class: 'flex items-center gap-2' }, [
+                h('span', { class: 'text-lg font-bold ' + (planning.value.coherenceReview.score >= 3 ? 'text-green-600' : planning.value.coherenceReview.score >= 2.5 ? 'text-amber-600' : 'text-red-600') }, (planning.value.coherenceReview.score ?? 0).toFixed(1)),
+                h('span', { class: 'text-xs text-slate-500' }, '/ 5 · ' + (planning.value.coherenceReview.verdict || '')),
+              ]),
+              (planning.value.coherenceReview.issues || []).length ? h('div', { class: 'mt-2 space-y-1' }, planning.value.coherenceReview.issues.map(function (i) { return h('div', { class: 'text-xs text-amber-700 bg-amber-50 rounded p-1.5' }, '[' + (i.dimension || '') + '] ' + (i.descripcion || '')); })) : h('p', { class: 'text-xs text-green-600 mt-1' }, 'Sin observaciones de coherencia.'),
+            ]) : null,
+          ]),
+        ])]) : null,
         planning.value.dua ? Card([h('div', { class: 'p-4' }, [
           h('div', { class: 'flex items-center gap-2 text-sm font-medium text-slate-800 mb-2' }, [
             h('span', '📐'),
@@ -222,6 +298,23 @@ const PlanningDetailPage = defineComponent({
           canApproveAsUtp() ? h('button', { onClick: approveAsUtp, class: 'bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition' }, '✓ Aprobar (UTP)') : null,
           exportButtons(),
         ]),
+        isOwnerView.value ? Card([h('div', { class: 'p-4 space-y-3' }, [
+          h('div', { class: 'flex items-center gap-2 text-sm font-medium text-slate-800' }, [h('span', '🔄'), h('span', 'Regenerar sección con IA')]),
+          regenDraft.value ? [
+            h('div', { class: 'text-xs text-slate-500' }, 'Se regeneró la sección "' + regenDraft.value.section + '". Revisa el borrador:'),
+            h('div', { class: 'max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50 text-xs text-slate-700 whitespace-pre-wrap' }, JSON.stringify(regenDraft.value.content, null, 2)),
+            h('div', { class: 'flex gap-2' }, [
+              h('button', { onClick: acceptDraft, disabled: regening.value, class: 'bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 transition' }, '✓ Aceptar y guardar'),
+              h('button', { onClick: rejectDraft, disabled: regening.value, class: 'bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-300 disabled:opacity-50 transition' }, 'Rechazar'),
+            ]),
+          ] : [
+            h('div', { class: 'flex gap-2 items-center' }, [
+              h('select', { class: 'flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm', value: regenSection.value, onChange: (e) => regenSection.value = e.target.value }, sectionOptions().map(function (opt) { return h('option', { value: opt[0] }, opt[1]); })),
+              h('button', { onClick: startRegen, disabled: regening.value, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition' }, regening.value ? 'Regenerando...' : 'Regenerar'),
+            ]),
+          ],
+          regenError.value ? h('p', { class: 'text-xs text-red-600' }, regenError.value) : null,
+        ])]) : null,
         h(CommentsList, { planningId: planning.value.id, comments: comments.value, canComment: isOrgAdmin() || isOwnerView.value }),
         isOrgAdmin() ? Card([h('div', { class: 'p-4 space-y-2' }, [
           h('div', { class: 'flex items-center gap-2 text-sm font-medium text-slate-800' }, [h('span', '💬'), h('span', 'Comentar al equipo')]),
