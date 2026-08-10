@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
 
 // Carga diferida (S-5.4): módulo del wizard de generación con IA.
 const WizardPage = defineComponent({
@@ -10,6 +10,7 @@ const WizardPage = defineComponent({
     const axisFilter = ref('');
     const searchQuery = ref('');
     const featureFlags = ref({ methodologyRecommendationsEnabled: false, tpContextEnabled: false, localContextEnabled: false });
+    const recommendations = ref([]); const recommendationId = ref(null); const recommending = ref(false); const recommendationError = ref('');
     const flagsLoaded = ref(false);
     let flagsCacheAt = 0;
     let flagsCache = null;
@@ -103,6 +104,65 @@ const WizardPage = defineComponent({
     };
     const resetAxisFilter = () => { axisFilter.value = ''; };
     const resetSearch = () => { searchQuery.value = ''; };
+
+    const requestRecommendations = async () => {
+      if (!flagEnabled('methods') || data.oaIds.length === 0) return;
+      recommending.value = true;
+      recommendationError.value = '';
+      try {
+        const res = await recommendMethodologiesFn({
+          context: {
+            type: data.type,
+            level: data.level,
+            subject: data.subject,
+            numClasses: data.type === 'class' ? undefined : data.numClasses,
+            duration: parseInt(data.duration),
+            modality: data.modality,
+            studentCount: data.studentCount,
+            priorKnowledge: data.priorKnowledge,
+            techAvailability: data.techAvailability,
+            internetAccess: data.internetAccess,
+            groupExperience: data.groupExperience,
+            studentAutonomy: data.studentAutonomy,
+            digitalCompetence: data.digitalCompetence,
+            rhythmDiversity: data.rhythmDiversity,
+            physicalResources: data.physicalResources,
+            territory: flagEnabled('local') ? data.territory : null,
+            tpContext: flagEnabled('tp') ? data.tpContext : null,
+          },
+          oaIds: data.oaIds,
+        });
+        recommendationId.value = res.data?.id || null;
+        recommendations.value = res.data?.recommendations || [];
+      } catch (e) {
+        recommendationError.value = e.message || 'No fue posible obtener recomendaciones.';
+      } finally {
+        recommending.value = false;
+      }
+    };
+
+    const applyRecommendation = async (recommendation) => {
+      if (recommendationId.value) {
+        await updateDoc(doc(db, 'methodology-recommendations', recommendationId.value), {
+          status: 'accepted',
+          chosen: recommendation.method,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      data.methodology = recommendation.method;
+      data.methodologies = [recommendation.method];
+      recommendations.value = [];
+    };
+
+    const ignoreRecommendations = async () => {
+      if (recommendationId.value) {
+        await updateDoc(doc(db, 'methodology-recommendations', recommendationId.value), {
+          status: 'ignored',
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      recommendations.value = [];
+    };
 
     const generate = async () => {
       generating.value = true; error.value = '';
@@ -330,6 +390,7 @@ const WizardPage = defineComponent({
     ]);
 
     const METHOD_OPTIONS = [['Clase dialogada', 'dialogada'], ['Aprendizaje Basado en Problemas', 'abp'], ['Aprendizaje Cooperativo', 'cooperativo'], ['Indagación', 'indagacion'], ['Gamificación', 'gamificacion'], ['Pensamiento Visible', 'pensamiento-visible']];
+    const METHOD_CODE_ALIASES = { ABPROY: 'abp', ABPROB: 'abp', DIRECTA: 'dialogada', ACOOP: 'cooperativo', IND: 'indagacion', GAM: 'gamificacion', PVISIBLE: 'pensamiento-visible' };
 const MULTI_METHOD_TYPES = ['unit', 'monthly', 'annual'];
 const isMultiMethod = () => MULTI_METHOD_TYPES.includes(data.type);
 const flagEnabled = (which) => which === 'tp'
@@ -340,13 +401,31 @@ const flagEnabled = (which) => which === 'tp'
       if (i >= 0) data.methodologies.splice(i, 1);
       else if (data.methodologies.length < 4) data.methodologies.push(v);
     };
-    const methodSelected = (v) => isMultiMethod() ? data.methodologies.includes(v) : data.methodology === v;
+    const methodSelected = (v) => isMultiMethod()
+      ? data.methodologies.includes(v) || data.methodologies.some(method => METHOD_CODE_ALIASES[method] === v)
+      : data.methodology === v || METHOD_CODE_ALIASES[data.methodology] === v;
 
     const step4 = () => h('div', { class: 'space-y-4' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Enfoque Metodológico'),
       h('p', { class: 'text-sm text-slate-500' }, isMultiMethod()
         ? 'Selecciona una o más metodologías: se distribuirán y combinarán entre las clases/semanas.'
         : 'Elige la metodología principal.'),
+      flagEnabled('methods') ? h('div', { class: 'rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2 max-w-2xl' }, [
+        h('div', { class: 'flex flex-wrap items-center justify-between gap-2' }, [
+          h('div', [h('p', { class: 'text-sm font-medium text-indigo-900' }, '¿Quieres comparar metodologías?'), h('p', { class: 'text-xs text-indigo-700' }, 'Las reglas revisan duración, recursos, edad y condiciones. La decisión final es tuya.')]),
+          h('button', { type: 'button', class: 'bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50', disabled: recommending.value || data.oaIds.length === 0, onClick: requestRecommendations }, recommending.value ? 'Analizando…' : 'Recomendar metodologías'),
+        ]),
+        recommendationError.value ? h('p', { class: 'text-xs text-red-700', role: 'alert' }, recommendationError.value) : null,
+        recommendations.value.length ? h('div', { class: 'space-y-2 pt-2', 'aria-live': 'polite' }, [
+          ...recommendations.value.map(recommendation => h('div', { class: 'rounded-lg bg-white border border-indigo-100 p-3 space-y-2' }, [
+          h('div', { class: 'flex flex-wrap items-center justify-between gap-2' }, [h('p', { class: 'font-medium text-sm text-slate-800' }, recommendation.method), h('span', { class: 'text-xs rounded-full bg-slate-100 px-2 py-1 text-slate-700' }, recommendation.pertinence)]),
+          recommendation.justification ? h('p', { class: 'text-sm text-slate-600' }, recommendation.justification) : null,
+          Array.isArray(recommendation.risks) && recommendation.risks.length ? h('p', { class: 'text-xs text-amber-700' }, `Riesgos: ${recommendation.risks.join(', ')}`) : null,
+          h('button', { type: 'button', class: 'text-sm text-indigo-700 font-medium hover:underline', onClick: () => applyRecommendation(recommendation) }, 'Usar esta metodología'),
+          ])),
+          h('button', { type: 'button', class: 'text-xs text-slate-600 hover:underline', onClick: ignoreRecommendations }, 'Continuar sin recomendación'),
+        ]) : null,
+      ]) : null,
       h('div', { class: 'grid grid-cols-2 gap-2 max-w-lg' },
         METHOD_OPTIONS.map(([l, v]) =>
           h('button', {

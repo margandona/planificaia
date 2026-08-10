@@ -30,6 +30,7 @@ import {
   buildDuaPrompt,
   buildMethodologyDistribution,
   buildPlanningRecord,
+  buildRecommendationPrompt,
   buildTypeInstruction,
   canApprovePlanning,
   collectPlanningText,
@@ -49,6 +50,7 @@ import {
   normalizeContextExtension,
   normalizePlanningOutput,
   parseCoherenceReview,
+  recommendMethodologies as recommendMethodologiesEngine,
   resolveFeatureFlags,
   retentionCutoffIso,
   runPedagogicalAudit,
@@ -58,6 +60,7 @@ import {
   scoreCriterion,
   serializePlanningForReview,
   validateOutputStructure,
+  validateRecommendationOutput,
   validateTermsAcceptance
 } from './logic.js';
 
@@ -746,6 +749,146 @@ async function runGeneratePlanning(request) {
       throw generationError;
     }
   }
+
+// U4: recomendador metodológico (sección 14). Las reglas deterministas filtran y
+// ordenan los candidatos; la IA solo los explica y contextualiza (nunca decide).
+export const recommendMethodologies = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { context, oaIds, planningId } = request.data || {};
+
+    // Flag: sin methodologyRecommendationsEnabled la función está desactivada.
+    const flags = await getFeatureFlags();
+    if (!flags.methodologyRecommendationsEnabled) {
+      throw new Error('FLAG_DESACTIVADO');
+    }
+
+    // Validación de entrada básica (CONTEXTO_INCOMPLETO).
+    if (!context || !Array.isArray(oaIds) || oaIds.length === 0) {
+      throw new Error('CONTEXTO_INCOMPLETO');
+    }
+    if (planningId) {
+      const planningSnap = await db.collection('plannings').doc(planningId).get();
+      if (planningSnap.exists && planningSnap.data().userId !== userId) {
+        throw new Error('ACCESO_NO_AUTORIZADO');
+      }
+    }
+
+    // Sanitizar y normalizar el contexto ampliado (U3) para las reglas.
+    const sanitizedContext = sanitizeContextFields(context);
+    const extensionResult = normalizeContextExtension(sanitizedContext, flags);
+    if (extensionResult.errors.length > 0) {
+      await db.collection('audit-logs').add({
+        userId,
+        action: 'recommend_context_invalid',
+        resource: 'methodology_recommendation',
+        errors: extensionResult.errors,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    sanitizedContext.contextExtension = extensionResult.extension;
+
+    // Candidatos deterministas (reglas puras): 1-3 recomendaciones.
+    const { recommendations: candidates } = recommendMethodologiesEngine(sanitizedContext, flags);
+    if (candidates.length === 0) {
+      return { recommendations: [], status: 'sin-candidatos' };
+    }
+
+    // OA desde Firestore para el contexto de la IA explicativa.
+    const oaDocs = [];
+    if (sanitizedContext.subject && sanitizedContext.level) {
+      const snap = await db.collection('curriculum')
+        .where('subject', '==', sanitizedContext.subject)
+        .where('level', '==', sanitizedContext.level)
+        .where('code', 'in', oaIds.slice(0, 10))
+        .limit(10)
+        .get();
+      snap.forEach(d => oaDocs.push(d.data()));
+    }
+
+    // IA explicativa (1 llamada): completa la estructura 14.2 sobre los candidatos.
+    const prompt = buildRecommendationPrompt(sanitizedContext, oaDocs, candidates);
+    const aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+    const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+    const parsed = Array.isArray(raw) ? raw : (raw ? raw.recommendations : null);
+    const allowedCandidates = new Map(candidates.map(candidate => [candidate.method, candidate]));
+    const merged = Array.isArray(parsed)
+      ? parsed
+        .filter(recommendation => allowedCandidates.has(recommendation?.method))
+        .slice(0, 3)
+        .map(recommendation => ({
+          ...recommendation,
+          // Estas dos decisiones son deterministas y nunca las puede cambiar la IA.
+          method: allowedCandidates.get(recommendation.method).method,
+          pertinence: allowedCandidates.get(recommendation.method).pertinence,
+        }))
+      : null;
+    const errors = validateRecommendationOutput(merged);
+
+    if (errors.length > 0 || !parsed) {
+      await db.collection('audit-logs').add({
+        userId,
+        action: 'recommend_validation_error',
+        resource: 'methodology_recommendation',
+        errors: errors.length ? errors : ['SALIDA_NO_JSON'],
+        createdAt: new Date().toISOString(),
+      });
+      // Fallback: devolver candidatos deterministas con datos del catálogo.
+      return { recommendations: candidates, status: 'deterministic', note: 'La explicación IA no pasó validación; se devolvió el análisis determinista.' };
+    }
+
+    // Persistir el resultado (methodology-recommendations/{id}).
+    const docRef = await db.collection('methodology-recommendations').add({
+      uid: userId,
+      planningId: planningId || null,
+      contextSnapshot: {
+        type: sanitizedContext.type,
+        level: sanitizedContext.level,
+        subject: sanitizedContext.subject,
+        modality: sanitizedContext.modality,
+        duration: sanitizedContext.duration,
+      },
+      recommendations: merged,
+      status: 'draft',
+      aiContributions: [{
+        model: aiResult.model,
+        provider: aiResult.provider,
+        inputTokens: aiResult.inputTokens,
+        outputTokens: aiResult.outputTokens,
+        cost: aiResult.cost,
+        generatedAt: new Date().toISOString(),
+      }],
+      createdAt: new Date().toISOString(),
+    });
+
+    // Trazabilidad y costo (mismo patrón que generatePlanning).
+    await db.collection('ai-costs').add({
+      userId,
+      date: new Date().toISOString().split('T')[0],
+      provider: aiResult.provider,
+      model: aiResult.model,
+      inputTokens: aiResult.inputTokens,
+      outputTokens: aiResult.outputTokens,
+      cost: aiResult.cost,
+      planningId: planningId || null,
+      action: 'recommend_methodology',
+      result: 'success',
+    });
+    await recordBudgetUsage(aiResult.cost);
+    await db.collection('audit-logs').add({
+      userId,
+      action: 'recommend_methodology',
+      resource: 'methodology_recommendation',
+      recommendationId: docRef.id,
+      createdAt: new Date().toISOString(),
+    });
+
+    return { recommendations: merged, status: 'ok', id: docRef.id };
+  }
+);
 
 export const regenerateSection = onCall(
   { cors: ['https://planificacion-con-ia.web.app'] },

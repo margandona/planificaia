@@ -1088,6 +1088,14 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U4 — Recomendador metodológico
 - `recommendMethodologies` (reglas puras + IA), UI paso 4, `methodology-recommendations`, aprobación docente. **Pruebas:** reglas, schemas, E2E de flujo.
 
+**Cierre (2026-08-10):** recomendador metodológico implementado con arquitectura híbrida (reglas puras + IA explicativa).
+- **Reglas deterministas (META-02):** `PERTINENCE`, `levelToApproxAge`, `contextSessionCount`, `evaluateMethodologyCandidate` y `recommendMethodologies` en `functions/logic.js`. Evalúan sesiones, duración, recursos, tecnología, internet, trabajo grupal, autonomía, edad mínima, socio comunitario para APS y riesgos TP; excluyen `MIXTA` y `PVISIBLE` del método primario.
+- **Función U4 (META-03):** callable `recommendMethodologies` en `functions/index.js`; valida autenticación, flag, contexto y propiedad de planificación; recupera OA, ejecuta primero las reglas, solicita a la IA solo explicación/contextualización, valida la estructura 14.2, fuerza `method`/`pertinence` desde las reglas, registra `methodology-recommendations`, `ai-costs`, `budget-usage` y `audit-logs`, y devuelve fallback determinista si la explicación IA no es válida.
+- **Schema:** `validateRecommendationOutput` valida 1–3 recomendaciones con los campos de la sección 14.2; `buildRecommendationPrompt` prohíbe porcentajes inventados, invenciones territoriales y cambios de candidatos.
+- **Frontend (META-04):** `recommendMethodologiesFn` exportada por `core.js`; el paso 4 muestra botón no bloqueante, tarjetas con etiqueta de pertinencia, riesgos y acción "Usar esta metodología" cuando `methodologyRecommendationsEnabled` está activa. El docente puede continuar sin recomendación.
+- **Persistencia y seguridad:** reglas owner para `methodology-recommendations`; retención de un año incorporada a `RETENTION_POLICY`.
+- **Verificación:** `pnpm --dir functions test:unit` 141/141; `node --check` en `logic.js`, `index.js`, `index.test.js`, `core.js` y `wizard.js`.
+
 ### Fase U5 — Variantes de actividades
 - `generateActivityVariants` (A/B/C/D), regla de recursos, UI.
 

@@ -68,7 +68,14 @@ import {
   normalizeContextExtension,
   buildContextExtensionText,
   normalizeTerritory,
-  normalizeTpContext
+  normalizeTpContext,
+  PERTINENCE,
+  levelToApproxAge,
+  contextSessionCount,
+  evaluateMethodologyCandidate,
+  recommendMethodologies,
+  validateRecommendationOutput,
+  buildRecommendationPrompt
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1167,5 +1174,119 @@ describe('U3 - Contexto ampliado', () => {
     expect(empty.contextExtension).toBeNull();
     const withExt = buildPlanningRecord(userId, { contextExtension: { techAvailability: '1-a-1' } }, oaDocs, content, aiResult, 't1');
     expect(withExt.contextExtension).toEqual({ techAvailability: '1-a-1' });
+  });
+});
+
+describe('U4 - Recomendador metodologico', () => {
+  test('levelToApproxAge mapea niveles a edades aproximadas', () => {
+    expect(levelToApproxAge('1-basico')).toBe(6);
+    expect(levelToApproxAge('8-basico')).toBe(13);
+    expect(levelToApproxAge('1-medio')).toBe(14);
+    expect(levelToApproxAge('4-medio')).toBe(17);
+    expect(levelToApproxAge('nt-nivel-transicion')).toBe(5);
+    expect(levelToApproxAge('epja-n1-eb')).toBe(18);
+    expect(levelToApproxAge('nivel-inexistente')).toBeNull();
+    expect(levelToApproxAge(null)).toBeNull();
+  });
+
+  test('contextSessionCount depende del tipo y numClasses', () => {
+    expect(contextSessionCount({ type: 'class' })).toBe(1);
+    expect(contextSessionCount({ type: 'unit', numClasses: '6' })).toBe(6);
+    expect(contextSessionCount({ type: 'monthly', numClasses: '4' })).toBe(4);
+    expect(contextSessionCount({ type: 'annual', numClasses: '10' })).toBe(10);
+    expect(contextSessionCount({ type: 'unit' })).toBe(6); // default
+    expect(contextSessionCount(null)).toBe(1);
+  });
+
+  test('ABPROY no se recomienda para una actividad breve', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'ABPROY');
+    const ctx = { type: 'class', duration: 45 };
+    const r = evaluateMethodologyCandidate(method, ctx);
+    expect(r.pertinence).toBe(PERTINENCE.NO_RECOMENDADA);
+    expect(r.reasons.some(x => x.includes('ABPROY'))).toBe(true);
+  });
+
+  test('ABPROY si se recomienda para unidad con suficientes sesiones', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'ABPROY');
+    const r = evaluateMethodologyCandidate(method, { type: 'unit', numClasses: '6', duration: 90 });
+    expect(r.pertinence).not.toBe(PERTINENCE.NO_RECOMENDADA);
+  });
+
+  test('SIM con sin dispositivos se degrada a la variante offline', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'SIM');
+    const r = evaluateMethodologyCandidate(method, { type: 'class', duration: 90, techAvailability: 'sin-dispositivos' });
+    expect(r.pertinence).toBe(PERTINENCE.POSIBLE);
+    expect(r.reasons.some(x => x.includes('Sin dispositivos'))).toBe(true);
+  });
+
+  test('APS sin socio comunitario declarado pide mas informacion', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'APS');
+    const noCommunity = evaluateMethodologyCandidate(method, { type: 'unit', numClasses: '6', duration: 90 });
+    expect(noCommunity.pertinence).toBe(PERTINENCE.REQUIERE_INFO);
+    const withCommunity = evaluateMethodologyCandidate(method, {
+      type: 'unit', numClasses: '6', duration: 90,
+      physicalResources: ['entorno-comunitario'],
+    });
+    expect(withCommunity.pertinence).toBe(PERTINENCE.RECOMENDADA);
+  });
+
+  test('grupo sin experiencia cooperativa degrada a POSIBLE', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'ACOOP');
+    const r = evaluateMethodologyCandidate(method, { type: 'unit', numClasses: '4', duration: 45, groupExperience: 'nula' });
+    expect(r.pertinence).toBe(PERTINENCE.POSIBLE);
+  });
+
+  test('regla de edad minima: DIRECTA no apta para sala cuna', () => {
+    const method = METHODOLOGY_CATALOG.find(m => m.code === 'DIRECTA');
+    const r = evaluateMethodologyCandidate(method, { type: 'class', duration: 45, level: 'sc-sala-cuna' });
+    expect(r.pertinence).toBe(PERTINENCE.NO_RECOMENDADA);
+  });
+
+  test('recommendMethodologies devuelve 1-3 candidatos ordenados sin MIXTA ni PVISIBLE', () => {
+    const ctx = { type: 'unit', numClasses: '6', duration: 90, modality: 'presencial', studentAutonomy: 'media', groupExperience: 'habitual' };
+    const { recommendations, flagEnabled } = recommendMethodologies(ctx, { methodologyRecommendationsEnabled: true });
+    expect(flagEnabled).toBe(true);
+    expect(recommendations.length).toBeGreaterThanOrEqual(1);
+    expect(recommendations.length).toBeLessThanOrEqual(3);
+    const codes = recommendations.map(r => r.method);
+    expect(codes).not.toContain('MIXTA');
+    expect(codes).not.toContain('PVISIBLE');
+    // Ordenados: pertinencia RECOMENDADA antes que POSIBLE.
+    const rank = (p) => p === PERTINENCE.RECOMENDADA ? 3 : p === PERTINENCE.POSIBLE ? 2 : p === PERTINENCE.REQUIERE_INFO ? 1 : 0;
+    for (let i = 1; i < recommendations.length; i++) {
+      expect(rank(recommendations[i - 1].pertinence)).toBeGreaterThanOrEqual(rank(recommendations[i].pertinence));
+    }
+  });
+
+  test('recommendMethodologies con flag apagada devuelve lista vacia', () => {
+    const { recommendations, flagEnabled } = recommendMethodologies({ type: 'class' }, {});
+    expect(flagEnabled).toBe(false);
+    expect(recommendations).toEqual([]);
+  });
+
+  test('validateRecommendationOutput acepta estructura 14.2 valida', () => {
+    const rec = {
+      method: 'ABPROY', pertinence: 'RECOMENDADA', justification: 'Desarrolla el OA mediante un producto integrador.', oaRelation: 'aplica', favoredSkills: ['pensar'], evidenceType: 'rúbrica', durationNeeded: '4 sesiones', minimumResources: ['cartulinas'], implementationConditions: ['tiempo'], risks: ['carga'], adaptations: ['etapas cortas'], offlineAlternative: 'papel', techAlternative: 'edición', gamificationPossible: true, complexity: 'media', teacherLoad: 'alta', studentLoad: 'alta', tpLink: null, territoryLink: null,
+    };
+    expect(validateRecommendationOutput([rec])).toEqual([]);
+  });
+
+  test('validateRecommendationOutput rechaza pertinence inventado o campos faltantes', () => {
+    const bad = [{ method: 'ABPROY', pertinence: '90% segura' }];
+    const errors = validateRecommendationOutput(bad);
+    expect(errors.some(e => e.includes('pertinence'))).toBe(true);
+    expect(validateRecommendationOutput('nope')).toHaveLength(1);
+  });
+
+  test('buildRecommendationPrompt fija candidatos deterministas y pide JSON en el mismo orden', () => {
+    const { system, user } = buildRecommendationPrompt(
+      { type: 'unit', numClasses: '6', modality: 'presencial', contextExtension: { techAvailability: '1-a-1' } },
+      [{ code: 'OA4', text: 'Leer textos' }],
+      [{ method: 'ABPROY', name: 'Aprendizaje Basado en Proyectos', pertinence: 'RECOMENDADA', reasons: [] }]
+    );
+    expect(system).toContain('Protección del sistema');
+    expect(user).toContain('Candidatos deterministas');
+    expect(user).toContain('ABPROY');
+    expect(system).toContain('arreglo JSON');
   });
 });
