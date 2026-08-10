@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
 
 // Carga diferida (S-5.4): detalle, comentarios y feedback.
 const PlanningDetailPage = defineComponent({
@@ -7,6 +7,7 @@ const PlanningDetailPage = defineComponent({
     const planning = ref(null); const loading = ref(true); const error = ref(''); const exporting = ref(false);
     const comments = ref([]); const newComment = ref(''); const commentError = ref(''); const addingComment = ref(false);
     const isOwnerView = ref(false);
+    const variantLoading = ref(null); const activityVariants = ref({}); const variantError = ref('');
 
     const id = window.location.hash.split('/').pop();
     const loadComments = async () => {
@@ -163,6 +164,17 @@ const PlanningDetailPage = defineComponent({
     };
     const rejectDraft = () => { regenDraft.value = null; };
 
+    const generateVariants = async (activity, index) => {
+      variantLoading.value = index;
+      variantError.value = '';
+      try {
+        const res = await generateActivityVariantsFn({ planningId: planning.value.id, activityId: activity.id || index, resources: planning.value.contextExtension?.physicalResources || [] });
+        activityVariants.value = { ...activityVariants.value, [index]: res.data?.variants || [] };
+      } catch (e) {
+        variantError.value = e.message || 'No se pudieron generar las variantes.';
+      } finally { variantLoading.value = null; }
+    };
+
     return () => h(Layout, { title: 'Detalle de Planificación' }, () => [
       loading.value ? h('div', { class: 'flex justify-center py-12' }, Spinner(8)) :
       error.value ? Alert('error', error.value) :
@@ -240,8 +252,11 @@ const PlanningDetailPage = defineComponent({
                   a.targetLevel ? h('span', { class: 'bg-slate-100 px-1.5 py-0.5 rounded text-[10px] text-slate-600' }, levelLabel(a.targetLevel)) : null,
                 ]),
                 h('p', { class: 'text-sm' }, a.description || a.title),
+                h('button', { type: 'button', class: 'text-xs text-blue-700 hover:underline mt-1', onClick: () => generateVariants(a, i), disabled: variantLoading.value === i }, variantLoading.value === i ? 'Generando variantes...' : 'Generar variantes A/B/C/D'),
+                activityVariants.value[i]?.length ? h('div', { class: 'mt-2 space-y-1 bg-slate-50 rounded p-2' }, activityVariants.value[i].map(variant => h('div', { class: 'text-xs' }, [h('span', { class: 'font-medium text-blue-700' }, `${variant.id}: ${variant.label || variant.type}`), h('span', { class: 'text-slate-600' }, ` — ${variant.description}`)]))) : null,
               ])
             ),
+            variantError.value ? h('p', { class: 'text-xs text-red-700', role: 'alert' }, variantError.value) : null,
           ]) : null,
         ])]),
         planning.value.warnings?.length > 0 ? Card([h('div', { class: 'p-4' }, [

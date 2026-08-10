@@ -26,10 +26,12 @@ import {
   applyPromptGuard,
   budgetId,
   buildCoherenceReviewPrompt,
+  buildActivityVariantsPrompt,
   buildContextExtensionText,
   buildDuaPrompt,
   buildMethodologyDistribution,
   buildPlanningRecord,
+  buildOfflineActivityVariant,
   buildRecommendationPrompt,
   buildTypeInstruction,
   canApprovePlanning,
@@ -50,16 +52,19 @@ import {
   normalizeContextExtension,
   normalizePlanningOutput,
   parseCoherenceReview,
+  filterActivityVariantsByResources,
   recommendMethodologies as recommendMethodologiesEngine,
   resolveFeatureFlags,
   retentionCutoffIso,
   runPedagogicalAudit,
   sanitizeContextFields,
+  normalizeDeclaredResources,
   sanitizeInput,
   sanitizeOrgName,
   scoreCriterion,
   serializePlanningForReview,
   validateOutputStructure,
+  validateActivityVariants,
   validateRecommendationOutput,
   validateTermsAcceptance
 } from './logic.js';
@@ -887,6 +892,86 @@ export const recommendMethodologies = onCall(
     });
 
     return { recommendations: merged, status: 'ok', id: docRef.id };
+  }
+);
+
+// U5: genera variantes de una actividad sin modificar la planificación fuente.
+export const generateActivityVariants = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { planningId, activityId, resources } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.methodologyRecommendationsEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!planningId || activityId === undefined || activityId === null) throw new Error('CONTEXTO_INCOMPLETO');
+
+    const planningSnap = await db.collection('plannings').doc(planningId).get();
+    if (!planningSnap.exists) throw new Error('PLANIFICACION_NO_ENCONTRADA');
+    const planning = planningSnap.data();
+    if (planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const findActivity = () => {
+      const roots = Array.isArray(planning.activities) ? planning.activities : [];
+      const direct = roots.find((activity, index) => String(activity.id || index) === String(activityId));
+      if (direct) return direct;
+      for (const group of ['classes', 'weeks', 'months']) {
+        for (const item of planning.unit?.[group] || []) {
+          const activity = (item.activities || []).find((candidate, index) => String(candidate.id || index) === String(activityId));
+          if (activity) return activity;
+        }
+      }
+      return null;
+    };
+    const activity = findActivity();
+    if (!activity) throw new Error('ACTIVIDAD_NO_ENCONTRADA');
+
+    let availableResources = normalizeDeclaredResources(resources);
+    if (availableResources.length === 0) {
+      const profileSnap = await db.collection('resource-profiles').doc(userId).get();
+      if (profileSnap.exists) availableResources = normalizeDeclaredResources(profileSnap.data().resources);
+    }
+
+    const prompt = buildActivityVariantsPrompt(activity, availableResources);
+    const aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+    const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+    const generated = Array.isArray(raw) ? raw : (raw?.variants || []);
+    const offline = buildOfflineActivityVariant(activity);
+    const withoutA = generated.filter(variant => variant?.id !== 'A');
+    const filtered = filterActivityVariantsByResources(withoutA, availableResources).slice(0, 3);
+    const variants = [offline, ...filtered];
+    const validationErrors = validateActivityVariants(variants, availableResources);
+
+    await db.collection('ai-costs').add({
+      userId,
+      date: new Date().toISOString().split('T')[0],
+      provider: aiResult.provider,
+      model: aiResult.model,
+      inputTokens: aiResult.inputTokens,
+      outputTokens: aiResult.outputTokens,
+      cost: aiResult.cost,
+      planningId,
+      action: 'generate_variants',
+      result: validationErrors.length ? 'deterministic_fallback' : 'success',
+    });
+    await recordBudgetUsage(aiResult.cost);
+    await db.collection('audit-logs').add({
+      userId,
+      action: 'generate_variants',
+      resource: 'planning_activity',
+      planningId,
+      activityId: String(activityId),
+      variantCount: variants.length,
+      filteredCount: Math.max(0, generated.length - filtered.length),
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      variants: validationErrors.length ? [offline] : variants,
+      status: validationErrors.length ? 'deterministic' : 'ok',
+      filteredCount: Math.max(0, generated.length - filtered.length),
+    };
   }
 );
 

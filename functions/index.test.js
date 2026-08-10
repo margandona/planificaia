@@ -75,7 +75,14 @@ import {
   evaluateMethodologyCandidate,
   recommendMethodologies,
   validateRecommendationOutput,
-  buildRecommendationPrompt
+  buildRecommendationPrompt,
+  normalizeDeclaredResources,
+  isResourceAvailable,
+  unavailableVariantResources,
+  buildOfflineActivityVariant,
+  filterActivityVariantsByResources,
+  validateActivityVariants,
+  buildActivityVariantsPrompt
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1288,5 +1295,46 @@ describe('U4 - Recomendador metodologico', () => {
     expect(user).toContain('Candidatos deterministas');
     expect(user).toContain('ABPROY');
     expect(system).toContain('arreglo JSON');
+  });
+});
+
+describe('U5 - Variantes de actividades', () => {
+  test('normaliza recursos y reconoce aliases disponibles', () => {
+    expect(normalizeDeclaredResources([' Proyector ', 'Internet estable'])).toEqual(['proyector', 'internet estable']);
+    expect(isResourceAvailable('proyector', ['computador-docente'])).toBe(true);
+    expect(isResourceAvailable('internet-estable', ['internet-limitado'])).toBe(false);
+    expect(isResourceAvailable('sin-recursos-multimedia', [])).toBe(true);
+  });
+
+  test('construye la variante A offline sin multimedia', () => {
+    const variant = buildOfflineActivityVariant({ title: 'Analizar un mapa', description: 'Interpretar un mapa local' });
+    expect(variant.id).toBe('A');
+    expect(variant.type).toBe('offline');
+    expect(variant.requiredResources).toEqual(['sin-recursos-multimedia']);
+    expect(validateActivityVariants([variant], [])).toEqual([]);
+  });
+
+  test('rechaza variantes que requieren recursos no declarados', () => {
+    const variants = [
+      buildOfflineActivityVariant({ description: 'Actividad base' }),
+      { id: 'B', label: 'Digital', description: 'Actividad digital', instructions: 'Usar la plataforma', requiredResources: ['tablets'] },
+    ];
+    expect(unavailableVariantResources(variants[1], ['proyector'])).toEqual(['tablets']);
+    expect(validateActivityVariants(variants, ['proyector']).some(error => error.includes('tablets'))).toBe(true);
+    expect(filterActivityVariantsByResources(variants, ['proyector'])).toHaveLength(1);
+    expect(filterActivityVariantsByResources(variants, ['tablets'])).toHaveLength(2);
+  });
+
+  test('schema exige variante A y limita a cuatro variantes', () => {
+    expect(validateActivityVariants([], [])).toContain('Falta la variante A sin multimedia');
+    const variant = { id: 'B', description: 'x', instructions: 'y', requiredResources: [] };
+    expect(validateActivityVariants([variant], [])).toContain('Falta la variante A sin multimedia');
+  });
+
+  test('buildActivityVariantsPrompt fija la regla offline y recursos declarados', () => {
+    const prompt = buildActivityVariantsPrompt({ title: 'Debate', description: 'Debatir una fuente' }, ['proyector']);
+    expect(prompt.system).toContain('variante A sin multimedia');
+    expect(prompt.user).toContain('proyector');
+    expect(prompt.user).toContain('requiredResources');
   });
 });

@@ -1099,6 +1099,14 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U5 — Variantes de actividades
 - `generateActivityVariants` (A/B/C/D), regla de recursos, UI.
 
+**Cierre (2026-08-10):** variantes de actividades implementadas con corte determinista de recursos.
+- **Reglas puras (REC-02):** `normalizeDeclaredResources`, `isResourceAvailable`, `unavailableVariantResources`, `filterActivityVariantsByResources`, `buildOfflineActivityVariant` y `validateActivityVariants` en `functions/logic.js`.
+- **Variante A obligatoria:** siempre se construye una alternativa sin multimedia basada en pizarra, papel, tarjetas, objetos y organizadores; no depende de internet ni dispositivos.
+- **Callable:** `generateActivityVariants` valida autenticación/propiedad, localiza la actividad, usa el perfil de recursos como fallback, solicita B/C/D a la IA, filtra cualquier recurso no declarado, registra `ai-costs`/`budget-usage`/`audit-logs` y nunca modifica la planificación fuente.
+- **Prompt/schema:** `buildActivityVariantsPrompt` trata la actividad como datos; `validateActivityVariants` limita a 1–4 variantes y exige A.
+- **Frontend:** `generateActivityVariantsFn` exportada por `core.js`; el detalle muestra acción por actividad y las variantes recibidas.
+- **Verificación:** `pnpm --dir functions test:unit` 146/146; `node --check` en `logic.js`, `index.js`, `index.test.js`, `core.js` y `detail.js`.
+
 ### Fase U6 — Modelo de gamificación
 - Colecciones de la sección 36 + schemas + `validateGamifiedExperience` (motor de reglas).
 
