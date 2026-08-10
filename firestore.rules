@@ -108,6 +108,39 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ========== Catálogo metodológico (U2): lectura pública, escritura solo admin ==========
+    match /methodology-catalog/{code} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ========== Feature flags (U3): lectura pública (wizard/cache 5 min), escritura admin ==========
+    match /config/feature-flags {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ========== Recursos del docente (U3): propietario ==========
+    match /resource-profiles/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ========== Contexto territorial opcional (U3): propietario ==========
+    match /territorial-contexts/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ========== Catálogo de especialidades TP (U3): lectura pública, escritura admin ==========
+    match /tp-specialties/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ========== Contexto TP opcional (U3): propietario ==========
+    match /tp-contexts/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
     // ========== Audit logs: solo Cloud Functions (no acceso directo) ==========
     match /audit-logs/{logId} {
       allow read: if isAdmin();

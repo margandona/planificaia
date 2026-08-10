@@ -55,7 +55,20 @@ import {
   PRIVACY_VERSION,
   RETENTION_POLICY,
   retentionCutoffIso,
-  validateTermsAcceptance
+  validateTermsAcceptance,
+  FEATURE_FLAGS,
+  resolveFeatureFlags,
+  TECH_AVAILABILITY_LEVELS,
+  INTERNET_ACCESS_LEVELS,
+  GROUP_EXPERIENCE_LEVELS,
+  STUDENT_AUTONOMY_LEVELS,
+  DIGITAL_COMPETENCE_LEVELS,
+  ZONA_LEVELS,
+  PHYSICAL_RESOURCES_CHECKLIST,
+  normalizeContextExtension,
+  buildContextExtensionText,
+  normalizeTerritory,
+  normalizeTpContext
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1002,5 +1015,157 @@ describe('U2 - Catalogo metodologico', () => {
     const rule = VALIDATION_RULES.find(r => r.id === 'V-013');
     const p = { type: 'class', methodology: 'MIXTA', purpose: 'Solo una clase expositiva', activities: [{ description: 'Escuchan y copian' }] };
     expect(rule.check(p)).toBe(true);
+  });
+});
+
+describe('U3 - Contexto ampliado', () => {
+  test('los enums validos coinciden con la seccion 15 del plan', () => {
+    expect(TECH_AVAILABILITY_LEVELS).toEqual(['sin-dispositivos', 'solo-docente', 'compartidos', '1-a-1']);
+    expect(INTERNET_ACCESS_LEVELS).toEqual(['estable', 'limitado', 'sin-internet']);
+    expect(GROUP_EXPERIENCE_LEVELS).toEqual(['nula', 'poca', 'habitual']);
+    expect(STUDENT_AUTONOMY_LEVELS).toEqual(['baja', 'media', 'alta']);
+    expect(DIGITAL_COMPETENCE_LEVELS).toEqual(['baja', 'media', 'alta']);
+    expect(ZONA_LEVELS).toEqual(['urbana', 'rural', 'costa', 'valle', 'cordillera']);
+  });
+
+  test('el checklist de recursos tiene los 19 items de la seccion 16', () => {
+    expect(PHYSICAL_RESOURCES_CHECKLIST).toHaveLength(19);
+    expect(PHYSICAL_RESOURCES_CHECKLIST).toContain('materiales-fisicos-basicos');
+    expect(PHYSICAL_RESOURCES_CHECKLIST).toContain('herramientas-taller');
+    expect(PHYSICAL_RESOURCES_CHECKLIST[0]).toBe('sin-recursos-multimedia');
+  });
+
+  test('resolveFeatureFlags usa defaults apagados y respeta booleanos', () => {
+    expect(resolveFeatureFlags({})).toEqual({ ...FEATURE_FLAGS, methodologyRecommendationsEnabled: false });
+    expect(resolveFeatureFlags({ methodologyRecommendationsEnabled: true, tpContextEnabled: true })).toMatchObject({
+      methodologyRecommendationsEnabled: true,
+      tpContextEnabled: true,
+      localContextEnabled: false,
+    });
+    // Valores no booleanos se ignoran (defensa contra un doc corrupto).
+    const flags = resolveFeatureFlags({ methodologyRecommendationsEnabled: 'yes', externalPromptGeneratorEnabled: 1 });
+    expect(flags.methodologyRecommendationsEnabled).toBe(false);
+    expect(flags.externalPromptGeneratorEnabled).toBe(false);
+  });
+
+  test('con metodologia habilitada captura los campos opcionales validos y filtra enums', () => {
+    const context = {
+      techAvailability: 'compartidos',
+      internetAccess: 'limitado',
+      groupExperience: 'habitual',
+      studentAutonomy: 'alta',
+      digitalCompetence: 'media',
+      rhythmDiversity: true,
+      physicalResources: ['proyector', 'pizarra-interactiva', 'recurso-inventado'],
+      barriers: ['lectoescritura', 'atencion'],
+    };
+    const { extension, errors } = normalizeContextExtension(context, { methodologyRecommendationsEnabled: true });
+    expect(errors).toHaveLength(0);
+    expect(extension).toMatchObject({
+      techAvailability: 'compartidos',
+      internetAccess: 'limitado',
+      groupExperience: 'habitual',
+      studentAutonomy: 'alta',
+      digitalCompetence: 'media',
+      rhythmDiversity: true,
+    });
+    expect(extension.physicalResources).toEqual(['proyector', 'pizarra-interactiva']);
+    expect(extension.barriers).toEqual(['lectoescritura', 'atencion']);
+  });
+
+  test('enums invalidos se reportan como errores y no se capturan', () => {
+    const { extension, errors } = normalizeContextExtension(
+      { techAvailability: 'no-se', internetAccess: 'estable' },
+      { methodologyRecommendationsEnabled: true }
+    );
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('techAvailability');
+    expect(extension.internetAccess).toBe('estable');
+    expect(extension.techAvailability).toBeUndefined();
+  });
+
+  test('con la flag apagada la extension queda vacia (comportamiento actual intacto)', () => {
+    const context = {
+      techAvailability: '1-a-1',
+      physicalResources: ['proyector'],
+      barriers: ['x'],
+      territory: { region: 'Metropolitana' },
+      tpContext: { especialidad: 'Electricidad' },
+    };
+    const { extension, errors } = normalizeContextExtension(context, {});
+    expect(errors).toHaveLength(0);
+    expect(extension).toEqual({});
+  });
+
+  test('territorio se normaliza solo con localContextEnabled y filtra zonas invalidas', () => {
+    const context = { territory: { region: 'Los Lagos', comuna: 'Puerto Montt', zona: 'rural', problemasLocales: ['costas'], organizaciones: ['Junta de Vecinos'] } };
+    const { extension } = normalizeContextExtension(context, { localContextEnabled: true });
+    expect(extension.territory).toMatchObject({
+      region: 'Los Lagos',
+      comuna: 'Puerto Montt',
+      zona: 'rural',
+      problemasLocales: ['costas'],
+      organizaciones: ['Junta de Vecinos'],
+    });
+    const badZone = normalizeContextExtension({ territory: { zona: 'subterraneo' } }, { localContextEnabled: true });
+    expect(badZone.extension.territory.zona).toBe('');
+    // Sin flag: territorio ignorado.
+    const off = normalizeContextExtension({ territory: { region: 'Arica' } }, {});
+    expect(off.extension.territory).toBeUndefined();
+  });
+
+  test('tpContext se normaliza solo con tpContextEnabled', () => {
+    const context = { tpContext: { isTp: true, sector: 'Electricidad', especialidad: 'Instalaciones Eléctricas', module: 'Instalación', competenciasTecnicas: ['medir voltaje'], equipamiento: ['multímetro'], riesgosSeguridad: ['riesgo eléctrico'] } };
+    const on = normalizeContextExtension(context, { tpContextEnabled: true });
+    expect(on.extension.tpContext).toMatchObject({
+      isTp: true,
+      sector: 'Electricidad',
+      especialidad: 'Instalaciones Eléctricas',
+      module: 'Instalación',
+    });
+    expect(on.extension.tpContext.competenciasTecnicas).toEqual(['medir voltaje']);
+    const off = normalizeContextExtension(context, {});
+    expect(off.extension.tpContext).toBeUndefined();
+  });
+
+  test('buildContextExtensionText produce texto plano de datos con las secciones presentes', () => {
+    const { extension } = normalizeContextExtension(
+      {
+        techAvailability: '1-a-1',
+        physicalResources: ['proyector'],
+        rhythmDiversity: true,
+        territory: { region: 'Metropolitana', comuna: 'Santiago' },
+      },
+      { methodologyRecommendationsEnabled: true, localContextEnabled: true }
+    );
+    const text = buildContextExtensionText(extension);
+    expect(text).toContain('Contexto ampliado del grupo');
+    expect(text).toContain('Disponibilidad tecnológica: 1-a-1');
+    expect(text).toContain('Diversidad de ritmos de aprendizaje: presente');
+    expect(text).toContain('Recursos disponibles: proyector');
+    expect(text).toContain('Territorio: Metropolitana, Santiago');
+  });
+
+  test('buildContextExtensionText devuelve string vacio sin extension', () => {
+    expect(buildContextExtensionText(null)).toBe('');
+    expect(buildContextExtensionText({})).toBe('');
+  });
+
+  test('sanitizeContextFields trata barriers como array sin romper el caso string', () => {
+    const asArray = sanitizeContextFields({ barriers: ['12.345.678-9', 'atencion'] });
+    expect(asArray.barriers).toEqual(['[...]', 'atencion']);
+    const asString = sanitizeContextFields({ barriers: 'RUT 12.345.678-9' });
+    expect(asString.barriers).toBe('RUT [...]');
+  });
+
+  test('buildPlanningRecord persiste contextExtension solo cuando hay datos', () => {
+    const userId = 'u1';
+    const oaDocs = [{ code: 'OA1', text: 'Texto', source: 'src' }];
+    const content = { purpose: 'Propósito válido para la prueba x', activities: [{ moment: 'inicio', description: 'Saludo y motivación inicial de la clase' }], assessment: { criteria: ['c1'] }, differentiation: '' };
+    const aiResult = { model: 'deepseek-v4-flash', provider: 'deepseek', inputTokens: 10, outputTokens: 20, cost: 0.001 };
+    const empty = buildPlanningRecord(userId, { contextExtension: null }, oaDocs, content, aiResult, 't1');
+    expect(empty.contextExtension).toBeNull();
+    const withExt = buildPlanningRecord(userId, { contextExtension: { techAvailability: '1-a-1' } }, oaDocs, content, aiResult, 't1');
+    expect(withExt.contextExtension).toEqual({ techAvailability: '1-a-1' });
   });
 });

@@ -26,6 +26,7 @@ import {
   applyPromptGuard,
   budgetId,
   buildCoherenceReviewPrompt,
+  buildContextExtensionText,
   buildDuaPrompt,
   buildMethodologyDistribution,
   buildPlanningRecord,
@@ -45,8 +46,10 @@ import {
   isCoherenceEnabled,
   isOverBudget,
   isRegenerableSection,
+  normalizeContextExtension,
   normalizePlanningOutput,
   parseCoherenceReview,
+  resolveFeatureFlags,
   retentionCutoffIso,
   runPedagogicalAudit,
   sanitizeContextFields,
@@ -354,6 +357,37 @@ async function generateFromProvider(systemPrompt, userPrompt, useFallback = fals
 // ─── BUILD PLANNING OBJECT ──────────────────────────────
 
 
+// U3: feature flags leídas de config/feature-flags (doc único, admin-write) con
+// caché de 5 minutos en memoria y override por variables de entorno
+// (p. ej. FLAG_methodologyRecommendationsEnabled=true). Flags apagadas si no existen.
+let featureFlagsCache = null;
+let featureFlagsCachedAt = 0;
+const FEATURE_FLAGS_CACHE_MS = 5 * 60 * 1000;
+
+async function getFeatureFlags() {
+  const now = Date.now();
+  if (featureFlagsCache && now - featureFlagsCachedAt < FEATURE_FLAGS_CACHE_MS) {
+    return featureFlagsCache;
+  }
+  let docData = {};
+  try {
+    const snap = await db.collection('config').doc('feature-flags').get();
+    if (snap.exists) docData = snap.data() || {};
+  } catch (e) {
+    // Doc ausente o error de lectura: se usa el fallback de entorno.
+  }
+  const flags = resolveFeatureFlags(docData);
+  for (const key of Object.keys(flags)) {
+    const envVal = process.env[`FLAG_${key}`];
+    if (envVal !== undefined && envVal !== '') {
+      flags[key] = /^(true|1|yes)$/i.test(String(envVal));
+    }
+  }
+  featureFlagsCache = flags;
+  featureFlagsCachedAt = now;
+  return flags;
+}
+
 // ─── CLOUD FUNCTIONS ────────────────────────────────────
 
 export const generatePlanning = onCall(
@@ -492,6 +526,31 @@ async function runGeneratePlanning(request) {
     // 5. Sanitizar entrada (PII + hardening anti inyección)
     const sanitizedContext = sanitizeContextFields(context);
 
+    // 5a. U3: contexto ampliado opcional (campos del paso 3 del wizard).
+    // Con las flags apagadas la extensión queda vacía y el comportamiento actual no cambia.
+    const flags = await getFeatureFlags();
+    const { extension, errors } = normalizeContextExtension(sanitizedContext, flags);
+    if (errors.length > 0) {
+      await db.collection('audit-logs').add({
+        userId,
+        action: 'context_extension_invalid',
+        resource: 'planning',
+        errors,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    sanitizedContext.contextExtension = extension;
+    // 5a1. Persistir perfil de recursos del docente (resource-profiles/{uid}).
+    if (extension && (extension.physicalResources || extension.internetAccess || extension.techAvailability)) {
+      await db.collection('resource-profiles').doc(userId).set({
+        uid: userId,
+        resources: extension.physicalResources || [],
+        internetAccess: extension.internetAccess || '',
+        techAvailability: extension.techAvailability || '',
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
+
     // 5b. Detectar intentos de prompt injection en los datos de entrada
     const contextInjection = detectPromptInjection([
       sanitizedContext.title,
@@ -536,7 +595,8 @@ async function runGeneratePlanning(request) {
       .replace('{{framework}}', sanitizedContext.framework === 'estandar' ? 'Formato estandar' : 'DUA (Diseño Universal para el Aprendizaje)')
       .replace('{{barriers}}', sanitizeInput(sanitizedContext.barriers || '') || 'ninguna en particular')
       .replace('{{dua}}', buildDuaPrompt(sanitizedContext.dua, sanitizedContext.framework))
-      + (typeInstruction ? `\n\n${typeInstruction}` : '');
+      + (typeInstruction ? `\n\n${typeInstruction}` : '')
+      + buildContextExtensionText(sanitizedContext.contextExtension);
 
     // 7. Llamar a IA (DeepSeek con fallback a Gemini)
     let aiResult;

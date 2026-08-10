@@ -5,11 +5,35 @@ const WizardPage = defineComponent({
   setup() {
     if (!guard()) return () => null;
     const step = ref(1);
-    const data = reactive({ type: 'class', title: '', level: '', level2: '', subject: '', oaIds: [], numClasses: 6, evaluationType: 'formativa', instrument: 'prueba', duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', methodologies: [], barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] } });
+    const data = reactive({ type: 'class', title: '', level: '', level2: '', subject: '', oaIds: [], numClasses: 6, evaluationType: 'formativa', instrument: 'prueba', duration: 45, modality: 'presencial', studentCount: '', priorKnowledge: '', resources: '', methodology: '', methodologies: [], barriers: '', framework: 'dua', dua: { representacion: [], accionExpresion: [], implicacion: [] }, techAvailability: '', internetAccess: '', groupExperience: '', studentAutonomy: '', digitalCompetence: '', rhythmDiversity: false, physicalResources: [], territory: { region: '', comuna: '', zona: '', actividadesProductivas: [], patrimonio: '', problemasLocales: [], medioambiente: [], institucionesCercanas: [], organizaciones: [], culturales: [], desafios: [] }, tpContext: { isTp: false, sector: '', especialidad: '', mention: '', level: '', module: '', competenciasTecnicas: [], contextoPractica: '', equipamiento: [], riesgosSeguridad: [] } });
     const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
     const axisFilter = ref('');
     const searchQuery = ref('');
-    onMounted(() => { loadSubjectCatalog(); });
+    const featureFlags = ref({ methodologyRecommendationsEnabled: false, tpContextEnabled: false, localContextEnabled: false });
+    const flagsLoaded = ref(false);
+    let flagsCacheAt = 0;
+    let flagsCache = null;
+
+    const loadFeatureFlags = async () => {
+      const now = Date.now();
+      if (flagsCache && now - flagsCacheAt < 5 * 60 * 1000) { featureFlags.value = flagsCache; flagsLoaded.value = true; return; }
+      try {
+        const snap = await getDoc(doc(db, 'config', 'feature-flags'));
+        const raw = snap.exists() ? snap.data() : {};
+        flagsCache = {
+          methodologyRecommendationsEnabled: raw.methodologyRecommendationsEnabled === true,
+          tpContextEnabled: raw.tpContextEnabled === true,
+          localContextEnabled: raw.localContextEnabled === true,
+        };
+        flagsCacheAt = now;
+        featureFlags.value = flagsCache;
+      } catch (e) {
+        featureFlags.value = { methodologyRecommendationsEnabled: false, tpContextEnabled: false, localContextEnabled: false };
+      }
+      flagsLoaded.value = true;
+    };
+
+    onMounted(() => { loadSubjectCatalog(); loadFeatureFlags(); });
 
     const loadOAs = async () => {
       const levelsToLoad = data.type === 'multigrade' ? [data.level, data.level2].filter(Boolean) : [data.level];
@@ -107,6 +131,15 @@ const WizardPage = defineComponent({
             barriers: data.barriers,
             framework: data.framework,
             dua: data.framework === 'dua' ? data.dua : null,
+            techAvailability: data.techAvailability,
+            internetAccess: data.internetAccess,
+            groupExperience: data.groupExperience,
+            studentAutonomy: data.studentAutonomy,
+            digitalCompetence: data.digitalCompetence,
+            rhythmDiversity: data.rhythmDiversity,
+            physicalResources: data.physicalResources,
+            territory: flagEnabled('local') && data.territory ? data.territory : null,
+            tpContext: flagEnabled('tp') && data.tpContext ? data.tpContext : null,
           },
           oaIds: data.oaIds,
         });
@@ -194,6 +227,46 @@ const WizardPage = defineComponent({
       h('button', { onClick: () => step.value = 3, disabled: !data.level || (data.type === 'multigrade' && !data.level2) || data.oaIds.length === 0, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50 hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
+    // U3: opciones de "Más contexto (opcional)" (secciones 15-16 del plan)
+    const OPT_TECH = [['', 'Sin informar'], ['sin-dispositivos', 'Sin dispositivos'], ['solo-docente', 'Solo el docente'], ['compartidos', 'Equipos compartidos'], ['1-a-1', 'Un dispositivo por estudiante']];
+    const OPT_INTERNET = [['', 'Sin informar'], ['estable', 'Internet estable'], ['limitado', 'Internet limitado'], ['sin-internet', 'Sin internet']];
+    const OPT_GROUP = [['', 'Sin informar'], ['nula', 'Nula'], ['poca', 'Poca'], ['habitual', 'Habitual']];
+    const OPT_AUTONOMY = [['', 'Sin informar'], ['baja', 'Baja'], ['media', 'Media'], ['alta', 'Alta']];
+    const OPT_COMPETENCE = OPT_AUTONOMY;
+    const RESOURCE_CHECKLIST = [
+      ['sin-recursos-multimedia', 'Sin recursos multimedia'],
+      ['materiales-fisicos-basicos', 'Materiales físicos básicos'],
+      ['biblioteca', 'Biblioteca'],
+      ['laboratorio', 'Laboratorio de ciencias'],
+      ['computador-docente', 'Computador del docente'],
+      ['computadores-estudiantes', 'Computadores para estudiantes'],
+      ['tablets', 'Tablets'],
+      ['telefonos-institucion', 'Teléfonos de la institución'],
+      ['proyector', 'Proyector'],
+      ['pizarra-interactiva', 'Pizarra interactiva'],
+      ['internet-estable', 'Internet estable'],
+      ['internet-limitado', 'Internet limitado'],
+      ['sin-internet', 'Sin internet'],
+      ['impresora', 'Impresora'],
+      ['herramientas-taller', 'Herramientas de taller'],
+      ['taller', 'Taller'],
+      ['laboratorio-tecnico', 'Laboratorio técnico'],
+      ['entorno-comunitario', 'Entorno comunitario'],
+      ['espacios-exteriores', 'Espacios exteriores'],
+    ];
+    const toggleResource = (code) => {
+      const i = data.physicalResources.indexOf(code);
+      if (i >= 0) data.physicalResources.splice(i, 1);
+      else data.physicalResources.push(code);
+    };
+    const selField = (key, options, label) => h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, label), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data[key] = e.target.value }, options.map(([v, l]) => h('option', { value: v }, l)))]);
+
+    const Step3ContextToggle = defineComponent({
+      props: ['title'],
+      data() { return { open: false }; },
+      render() { return h('div', { class: 'mt-2 border border-slate-200 rounded-lg overflow-hidden' }, [h('button', { class: 'w-full flex items-center justify-between px-3 py-2 bg-slate-50 text-sm font-medium text-slate-700 hover:bg-slate-100 transition', onClick: () => this.open = !this.open, 'aria-expanded': this.open ? 'true' : 'false' }, [this.title, h('span', {}, this.open ? '−' : '+')]), this.open ? h('div', { class: 'p-3 space-y-3' }, this.$slots.default()) : null]); },
+    });
+
     const step3 = () => h('div', { class: 'space-y-4 max-w-lg' }, [
       h('h2', { class: 'text-lg font-semibold' }, 'Contexto Pedagógico'),
       data.type === 'unit' ? h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Número de clases'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.numClasses = parseInt(e.target.value) }, [4, 5, 6, 7, 8].map(n => h('option', { value: n }, `${n} clases`)))]) : null,
@@ -209,12 +282,59 @@ const WizardPage = defineComponent({
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Estudiantes (aprox.)'), h('input', { type: 'number', class: 'w-full border border-slate-300 rounded-lg px-3 py-2', placeholder: '30', onInput: (e) => data.studentCount = e.target.value })]),
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Conocimientos previos'), h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', rows: 2, placeholder: 'Lo que los estudiantes ya saben...', onInput: (e) => data.priorKnowledge = e.target.value }), h('p', { class: 'text-xs text-amber-600 mt-1' }, 'No uses nombres ni RUT de estudiantes.')]),
       h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Recursos (separados por coma)'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', placeholder: 'proyector, cuadernos, mapas', onInput: (e) => data.resources = e.target.value })]),
+      flagEnabled('methods') ? h(Step3ContextToggle, { title: 'Más contexto (opcional)' }, {
+        default: () => [
+          h('p', { class: 'text-xs text-slate-500' }, 'Opcional. Ayuda al generador a ajustar la propuesta a tu grupo. No ingreses datos personales de estudiantes.'),
+          h('div', { class: 'grid grid-cols-2 gap-3' }, [
+            selField('techAvailability', OPT_TECH, 'Disponibilidad tecnológica'),
+            selField('internetAccess', OPT_INTERNET, 'Acceso a internet'),
+            selField('groupExperience', OPT_GROUP, 'Experiencia de trabajo grupal'),
+            selField('studentAutonomy', OPT_AUTONOMY, 'Autonomía del estudiantado'),
+            selField('digitalCompetence', OPT_COMPETENCE, 'Competencia digital'),
+          ]),
+          h('label', { class: 'flex items-center gap-2 text-sm text-slate-700 cursor-pointer' }, [
+            h('input', { type: 'checkbox', checked: data.rhythmDiversity, onChange: (e) => data.rhythmDiversity = e.target.checked, class: 'rounded' }),
+            'El grupo tiene diversidad de ritmos de aprendizaje',
+          ]),
+          h('div', [h('p', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Recursos disponibles'), h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-1' }, RESOURCE_CHECKLIST.map(([code, label]) => h('label', { class: 'flex items-start gap-2 text-xs text-slate-600 cursor-pointer' }, [
+            h('input', { type: 'checkbox', checked: data.physicalResources.includes(code), onChange: () => toggleResource(code), class: 'mt-0.5 rounded' }),
+            label,
+          ])))]),
+        ],
+      }) : null,
+      flagEnabled('local') ? h(Step3ContextToggle, { title: 'Contexto territorial (opcional)' }, {
+        default: () => [
+          h('div', { class: 'grid grid-cols-2 gap-3' }, [
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Región'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => data.territory.region = e.target.value })]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Comuna'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => data.territory.comuna = e.target.value })]),
+          ]),
+          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Zona'), h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onChange: (e) => data.territory.zona = e.target.value }, [['', 'Sin informar'], ['urbana', 'Urbana'], ['rural', 'Rural'], ['costa', 'Costa'], ['valle', 'Valle'], ['cordillera', 'Cordillera']].map(([v, l]) => h('option', { value: v }, l)))]),
+          h('p', { class: 'text-xs text-amber-600' }, 'Solo se usa información que tú declares. No inventamos instituciones ni datos locales.'),
+        ],
+      }) : null,
+      flagEnabled('tp') ? h(Step3ContextToggle, { title: 'Contexto técnico-profesional (opcional)' }, {
+        default: () => [
+          h('label', { class: 'flex items-center gap-2 text-sm text-slate-700 cursor-pointer' }, [
+            h('input', { type: 'checkbox', checked: data.tpContext.isTp, onChange: (e) => data.tpContext.isTp = e.target.checked, class: 'rounded' }),
+            'El curso pertenece a una formación técnico-profesional (EMTP)',
+          ]),
+          h('div', { class: 'grid grid-cols-2 gap-3' }, [
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Sector'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => data.tpContext.sector = e.target.value })]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Especialidad'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => data.tpContext.especialidad = e.target.value })]),
+            h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Especialidad no encontrada'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', onInput: (e) => data.tpContext.mention = e.target.value })]),
+          ]),
+          h('div', [h('label', { class: 'block text-sm font-medium text-slate-700 mb-1' }, 'Contexto de práctica'), h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2', placeholder: 'taller, empresa, obra, laboratorio', onInput: (e) => data.tpContext.contextoPractica = e.target.value })]),
+        ],
+      }) : null,
       h('button', { onClick: () => step.value = 4, class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition' }, 'Siguiente →'),
     ]);
 
     const METHOD_OPTIONS = [['Clase dialogada', 'dialogada'], ['Aprendizaje Basado en Problemas', 'abp'], ['Aprendizaje Cooperativo', 'cooperativo'], ['Indagación', 'indagacion'], ['Gamificación', 'gamificacion'], ['Pensamiento Visible', 'pensamiento-visible']];
-    const multiMethodTypes = ['unit', 'monthly', 'annual'];
-    const isMultiMethod = () => multiMethodTypes.includes(data.type);
+const MULTI_METHOD_TYPES = ['unit', 'monthly', 'annual'];
+const isMultiMethod = () => MULTI_METHOD_TYPES.includes(data.type);
+const flagEnabled = (which) => which === 'tp'
+  ? featureFlags.value.tpContextEnabled
+  : which === 'local' ? featureFlags.value.localContextEnabled : featureFlags.value.methodologyRecommendationsEnabled;
     const toggleMethod = (v) => {
       const i = data.methodologies.indexOf(v);
       if (i >= 0) data.methodologies.splice(i, 1);

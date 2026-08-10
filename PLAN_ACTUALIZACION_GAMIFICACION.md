@@ -1074,6 +1074,17 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U3 — Contexto ampliado
 - Campos opcionales del paso 3; `resource-profiles`, `territorial-contexts`, `tp-contexts`; UI colapsable. Flags `tpContextEnabled`/`localContextEnabled`/`methodologyRecommendationsEnabled`.
 
+**Cierre (2026-08-10):** contexto ampliado implementado con lógica pura en `functions/logic.js`.
+- **Enums y checklist (secciones 15–16):** `TECH_AVAILABILITY_LEVELS`, `INTERNET_ACCESS_LEVELS`, `GROUP_EXPERIENCE_LEVELS`, `STUDENT_AUTONOMY_LEVELS`, `DIGITAL_COMPETENCE_LEVELS`, `ZONA_LEVELS` y `PHYSICAL_RESOURCES_CHECKLIST` (19 items) exportadas desde `logic.js`.
+- **Feature flags:** `FEATURE_FLAGS` (por defecto apagadas) + `resolveFeatureFlags`. En `index.js`, `getFeatureFlags()` lee `config/feature-flags` con caché de 5 min y override por env (`FLAG_*`). Con las flags apagadas el wizard se comporta igual que hoy.
+- **Normalización:** `normalizeTerritory`, `normalizeTpContext` (sanitización PII campo a campo) y `normalizeContextExtension(context, flags)` que captura solo los campos habilitados, valida enums y devuelve `{ extension, errors }`.
+- **Prompt:** `buildContextExtensionText(extension)` genera texto plano de datos ("Contexto ampliado del grupo") añadido al userPrompt cuando hay extensión; `sanitizeContextFields` acepta `barriers` como string (legacy) o array.
+- **Persistencia:** `buildPlanningRecord` guarda `contextExtension` (snapshot) y `index.js` hace upsert del perfil en `resource-profiles/{uid}`.
+- **Firestore rules:** `methodology-catalog` (U2), `config/feature-flags` (read público), `resource-profiles`, `territorial-contexts`, `tp-contexts` (owner), `tp-specialties` (read público/admin-write).
+- **Frontend (wizard paso 3):** secciones colapsables "Más contexto (opcional)", "Contexto territorial" y "Contexto técnico-profesional" renderizadas solo con `methodologyRecommendationsEnabled`/`localContextEnabled`/`tpContextEnabled` (flags leídas con caché de 5 min).
+- **Hidden de la fase:** U2 pendiente de seed contra producción; `config/feature-flags` y `tp-specialties` pendientes de seed.
+- **Verificación:** `pnpm --dir functions test:unit` 128/128 (12 tests nuevos de U3); `node --check` en `logic.js`, `index.js`, `index.test.js` y `wizard.js`.
+
 ### Fase U4 — Recomendador metodológico
 - `recommendMethodologies` (reglas puras + IA), UI paso 4, `methodology-recommendations`, aprobación docente. **Pruebas:** reglas, schemas, E2E de flujo.
 
