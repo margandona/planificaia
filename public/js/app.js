@@ -470,6 +470,7 @@ async function resolveRoute() {
   if (hash === '/nueva-manual') return (await import('./pages/editor.js')).ManualEditor;
   if (hash.startsWith('/unirme/')) return (await import('./pages/institucional.js')).JoinOrgPage;
   if (hash === '/institucional') return (await import('./pages/institucional.js')).InstitucionalPage;
+  if (hash === '/gamificaciones') return (await import('./pages/gamificaciones.js')).GamificacionesPage;
 
   const routes = {
     '/': LandingPage,

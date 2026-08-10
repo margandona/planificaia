@@ -121,6 +121,67 @@ service cloud.firestore {
       allow update, delete: if isOwner(resource.data.uid);
     }
 
+    // ========== Experiencias gamificadas U6/U7 ==========
+    match /gamified-experiences/{experienceId} {
+      allow read: if isOwner(resource.data.authorUid)
+        || (resource.data.orgId != null && isMember(resource.data.orgId));
+      allow create: if isAuthenticated()
+        && request.resource.data.authorUid == request.auth.uid
+        && (request.resource.data.orgId == null || isMember(request.resource.data.orgId));
+      allow update, delete: if isOwner(resource.data.authorUid)
+        || (resource.data.orgId != null && isOrgAdmin(resource.data.orgId));
+
+      match /versions/{versionId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.authorUid)
+          || (get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.orgId != null
+            && isMember(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.orgId));
+        allow write: if isOwner(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.authorUid)
+          || isOrgAdmin(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.orgId);
+      }
+
+      match /missions/{missionId} {
+        allow read, write: if isOwner(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.authorUid)
+          || isOrgAdmin(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.orgId);
+      }
+
+      match /rules/{ruleId} {
+        allow read, write: if isOwner(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.authorUid)
+          || isOrgAdmin(get(/databases/$(database)/documents/gamified-experiences/$(experienceId)).data.orgId);
+      }
+
+      // Participantes y evidencias se habilitarán mediante Functions en U8/U9.
+      match /participants/{participantToken} {
+        allow read, write: if false;
+        match /progress/{progressId} {
+          allow read, write: if false;
+        }
+      }
+      match /evidence/{evidenceId} {
+        allow read, write: if false;
+      }
+      match /feedback/{feedbackId} {
+        allow read, write: if false;
+      }
+    }
+
+    // ========== Catálogo de insignias U6: público/admin ==========
+    match /badges/{badgeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /badge-awards/{awardId} {
+      allow read, write: if false;
+    }
+
+    match /gamification-costs/{costId} {
+      allow read, write: if false;
+    }
+
+    match /gamification-audit-logs/{logId} {
+      allow read, write: if false;
+    }
+
     // ========== Feature flags (U3): lectura pública (wizard/cache 5 min), escritura admin ==========
     match /config/feature-flags {
       allow read: if true;

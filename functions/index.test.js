@@ -82,7 +82,21 @@ import {
   buildOfflineActivityVariant,
   filterActivityVariantsByResources,
   validateActivityVariants,
-  buildActivityVariantsPrompt
+  buildActivityVariantsPrompt,
+  GAMIFIED_EXPERIENCE_STATUSES,
+  GAMIFIED_EXPERIENCE_MODES,
+  GAMIFIED_SOURCE_TYPES,
+  normalizeMission,
+  normalizeExperienceRule,
+  normalizeGamifiedExperience,
+  validateGamifiedExperience,
+  GAMIFICATION_INTENSITY_LEVELS,
+  ALLOWED_GAMIFICATION_SECTIONS,
+  isRegenerableGamificationSection,
+  buildGamificationSourceContext,
+  buildGamificationDraftPrompt,
+  validateGamificationDraft,
+  buildGamificationSectionPrompt
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1336,5 +1350,111 @@ describe('U5 - Variantes de actividades', () => {
     expect(prompt.system).toContain('variante A sin multimedia');
     expect(prompt.user).toContain('proyector');
     expect(prompt.user).toContain('requiredResources');
+  });
+});
+
+describe('U6 - Modelo de gamificacion', () => {
+  test('expone enums estables para estado, modo y origen', () => {
+    expect(GAMIFIED_EXPERIENCE_STATUSES).toEqual(['draft', 'published', 'paused', 'archived']);
+    expect(GAMIFIED_EXPERIENCE_MODES).toContain('teams');
+    expect(GAMIFIED_SOURCE_TYPES).toContain('activity');
+  });
+
+  test('normaliza misiones y reglas con defaults seguros', () => {
+    expect(normalizeMission({ title: 'Misión', points: '10' }, 0)).toMatchObject({ id: 'mission-1', points: 10, type: 'challenge' });
+    expect(normalizeExperienceRule({ event: 'mission_completed', action: 'add_points' }, 1)).toMatchObject({ id: 'rule-2', priority: 2 });
+    expect(normalizeGamifiedExperience({ status: 'unknown', mode: 'unknown', missions: [{ title: 'M' }] })).toMatchObject({ status: 'draft', mode: 'individual' });
+  });
+
+  test('aprueba una experiencia mínima válida', () => {
+    const result = validateGamifiedExperience({
+      title: 'Exploradores del agua',
+      description: 'Secuencia para investigar el uso responsable del agua.',
+      purpose: 'Comprender el uso responsable del agua.',
+      evidenceCriteria: ['Explica una medida de cuidado.'],
+      skills: ['argumentación'],
+      missions: [{ id: 'm1', order: 1, title: 'Observar', instructions: 'Observa una situación y registra hallazgos.', points: 10 }],
+    });
+    expect(result.valid).toBe(true);
+    expect(result.verdict).toBe('APROBADA');
+  });
+
+  test('detecta misiones inaccesibles, ciclos y puntos negativos', () => {
+    const result = validateGamifiedExperience({
+      title: 'Experiencia con problemas', description: 'Una experiencia suficientemente descrita.', purpose: 'Aprender.',
+      missions: [
+        { id: 'm1', title: 'Uno', instructions: 'Completa uno.', points: -2, unlockConditions: [{ missionId: 'm2' }] },
+        { id: 'm2', title: 'Dos', instructions: 'Completa dos.', points: 2, unlockConditions: [{ missionId: 'm1' }] },
+        { id: 'm3', title: 'Tres', instructions: 'Completa tres.', points: 1, unlockConditions: [{ missionId: 'missing' }] },
+      ],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.critical.some(issue => issue.code === 'NEGATIVE_POINTS')).toBe(true);
+    expect(result.critical.some(issue => issue.code === 'MISSION_CYCLE')).toBe(true);
+    expect(result.warnings.some(issue => issue.code === 'MISSION_FORWARD_DEPENDENCY')).toBe(true);
+  });
+
+  test('detecta reglas inválidas y misiones incompletas', () => {
+    const result = validateGamifiedExperience({
+      title: 'Experiencia', description: 'Descripción suficiente para validar.', purpose: 'Propósito.',
+      missions: [{ id: 'm1', title: '', instructions: '' }],
+      rules: [{ id: 'r1', event: 'evento-inventado', action: '' }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.critical.some(issue => issue.code === 'MISSION_INCOMPLETE')).toBe(true);
+    expect(result.critical.some(issue => issue.code === 'RULE_EVENT_INVALID')).toBe(true);
+    expect(result.critical.some(issue => issue.code === 'RULE_ACTION_MISSING')).toBe(true);
+  });
+});
+
+describe('U7 - Constructor de experiencias gamificadas', () => {
+  test('whitelist de secciones regenerables con protección tipo B1', () => {
+    expect(ALLOWED_GAMIFICATION_SECTIONS).toContain('narrative');
+    expect(isRegenerableGamificationSection('narrative')).toBe(true);
+    expect(isRegenerableGamificationSection('authorUid')).toBe(false);
+    expect(isRegenerableGamificationSection('status')).toBe(false);
+    expect(GAMIFICATION_INTENSITY_LEVELS).toEqual(['estructure', 'draft']);
+  });
+
+  test('extrae contexto fuente sin tocar la planificación', () => {
+    const planning = {
+      title: 'Clase de ciencias',
+      purpose: 'Comprender el ciclo del agua.',
+      learningObjectives: [{ code: 'OA10', text: 'Explicar el ciclo del agua' }],
+      assessment: { criteria: ['Explica etapas', 'Distingue estados'] },
+      activities: [{ id: 'a1', title: 'Modelar', description: 'Construir un modelo del ciclo', assessment: { criteria: ['Explica etapas'] } }],
+    };
+    const context = buildGamificationSourceContext(planning, { sourceType: 'activity', sourceActivityId: 'a1' });
+    expect(context.sourceType).toBe('activity');
+    expect(context.oa[0].code).toBe('OA10');
+    expect(context.evidenceCriteria).toContain('Explica etapas');
+    expect(planning.title).toBe('Clase de ciencias');
+  });
+
+  test('buildGamificationDraftPrompt nunca permite sobrescribir la fuente', () => {
+    const prompt = buildGamificationDraftPrompt(
+      { title: 'Unidad', learningObjectives: [{ code: 'OA1', text: 'Objetivo' }] },
+      { sourceType: 'unit' },
+      'draft'
+    );
+    expect(prompt.system).toContain('Protección del sistema');
+    expect(prompt.system).toContain('NUNCA modifiques la planificación');
+    expect(prompt.user).toContain('missions[]');
+    expect(prompt.user).toContain('rules[]');
+  });
+
+  test('valida el borrador del modelo contra el schema 42', () => {
+    const valid = { title: 'Exploradores', narrative: 'Una aventura por el agua', missions: [{ id: 'm1' }], rules: [] };
+    expect(validateGamificationDraft(valid)).toEqual([]);
+    expect(validateGamificationDraft({ title: '' })).toContain('Falta título válido');
+    expect(validateGamificationDraft({ title: 'x', narrative: '', missions: [] })).toContain('Faltan misiones');
+    expect(validateGamificationDraft(null)).toContain('SALIDA_NO_JSON');
+  });
+
+  test('buildGamificationSectionPrompt protege secciones no permitidas', () => {
+    const prompt = buildGamificationSectionPrompt('narrative', 'Narrativa actual', 'Hazla más breve');
+    expect(prompt.system).toContain('Regeneras SOLO la sección');
+    expect(prompt.user).toContain('Narrativa actual');
+    expect(prompt.user).toContain('Hazla más breve');
   });
 });

@@ -66,7 +66,16 @@ import {
   validateOutputStructure,
   validateActivityVariants,
   validateRecommendationOutput,
-  validateTermsAcceptance
+  validateTermsAcceptance,
+  GAMIFICATION_INTENSITY_LEVELS,
+  ALLOWED_GAMIFICATION_SECTIONS,
+  isRegenerableGamificationSection,
+  buildGamificationSourceContext,
+  buildGamificationDraftPrompt,
+  validateGamificationDraft,
+  buildGamificationSectionPrompt,
+  normalizeGamifiedExperience,
+  validateGamifiedExperience
 } from './logic.js';
 
 export {
@@ -972,6 +981,226 @@ export const generateActivityVariants = onCall(
       status: validationErrors.length ? 'deterministic' : 'ok',
       filteredCount: Math.max(0, generated.length - filtered.length),
     };
+  }
+);
+
+// U7: crea una experiencia gamificada a partir de una planificación (sección 22).
+// Modalidad nativa. La planificación fuente nunca se sobrescribe; se copia solo un
+// contexto extraído (OA, propósito, criterios) y se persiste una experiencia draft.
+export const createGamifiedExperience = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { planningId, sourceRef, modes, intensity } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!planningId || !sourceRef || typeof sourceRef !== 'object') throw new Error('FUENTE_NO_ENCONTRADA');
+    if (modes && !Array.isArray(modes)) throw new Error('MODO_INVALIDO');
+    const level = intensity || 'draft';
+    if (!GAMIFICATION_INTENSITY_LEVELS.includes(level)) throw new Error('INTENSIDAD_INVALIDA');
+
+    const planningSnap = await db.collection('plannings').doc(planningId).get();
+    if (!planningSnap.exists) throw new Error('FUENTE_NO_ENCONTRADA');
+    const planning = planningSnap.data();
+    if (planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const now = new Date().toISOString();
+    const context = buildGamificationSourceContext(planning, sourceRef);
+    const baseRecord = {
+      title: context.title,
+      description: context.purpose,
+      narrative: '',
+      status: 'draft',
+      authorUid: userId,
+      orgId: planning.orgId || null,
+      sourcePlanningId: planningId,
+      sourcePlanningVersionId: planning.version || null,
+      sourceActivityId: sourceRef.sourceActivityId || null,
+      sourceType: context.sourceType,
+      oa: context.oa,
+      skills: [],
+      attitudes: [],
+      purpose: context.purpose,
+      evidenceCriteria: context.evidenceCriteria,
+      mode: modes && modes.includes('teams') ? 'teams' : (modes && modes.includes('presentation') ? 'presentation' : 'individual'),
+      aiContributions: [],
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    let aiResult = null;
+    if (level === 'draft') {
+      const prompt = buildGamificationDraftPrompt(planning, sourceRef);
+      aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+      const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+      const draft = (raw && typeof raw === 'object') ? await normalizeGamifiedExperience({ ...raw, oa: context.oa, evidenceCriteria: context.evidenceCriteria }) : null;
+      const draftErrors = validateGamificationDraft(raw || null);
+      if (!aiResult || (draftErrors.length === 0 && draft)) {
+        if (draft) {
+          baseRecord.description = draft.description || baseRecord.description;
+          baseRecord.narrative = draft.narrative || '';
+          baseRecord.activities = draft.activities || [];
+          baseRecord.missions = draft.missions || [];
+          baseRecord.rules = draft.rules || [];
+          baseRecord.skills = draft.skills || [];
+          baseRecord.attitudes = draft.attitudes || [];
+        }
+      }
+      if (!draft || draftErrors.length > 0) {
+        await db.collection('audit-logs').add({
+          userId, action: 'gamify_create_draft_error', resource: 'gamified_experience',
+          planningId, errors: draftErrors.length ? draftErrors : ['DRAFT_INVALIDO'], createdAt: now,
+        });
+      }
+    }
+
+    const docRef = await db.collection('gamified-experiences').add(baseRecord);
+    await db.collection('gamification-audit-logs').add({
+      expId: docRef.id, action: 'gamify_create', data: { intensity: level, sourceType: context.sourceType },
+      createdAt: now, uid: userId,
+    });
+    await db.collection('audit-logs').add({
+      userId, action: 'gamify_create', resource: 'gamified_experience', resourceId: docRef.id,
+      planningId, intensity: level, createdAt: now,
+    });
+
+    if (aiResult) {
+      await db.collection('ai-costs').add({
+        userId, date: now.split('T')[0], provider: aiResult.provider, model: aiResult.model,
+        inputTokens: aiResult.inputTokens, outputTokens: aiResult.outputTokens, cost: aiResult.cost,
+        planningId, expId: docRef.id, action: 'gamify_draft', result: 'success',
+      });
+      await db.collection('gamification-costs').add({
+        expId: docRef.id, functionType: 'gamificacion', provider: aiResult.provider, model: aiResult.model,
+        tokensIn: aiResult.inputTokens, tokensOut: aiResult.outputTokens, cost: aiResult.cost,
+        date: now.split('T')[0], uid: userId, result: 'success',
+      });
+      await recordBudgetUsage(aiResult.cost);
+    }
+
+    return { experienceId: docRef.id, status: 'draft', intensity: level };
+  }
+);
+
+// U7: genera (o regenera) el borrador IA de una experiencia existente.
+export const generateGamificationDraft = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { experienceId } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expSnap = await db.collection('gamified-experiences').doc(experienceId).get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    if (experience.authorUid !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+    if (experience.status !== 'draft') throw new Error('STATUS_INVALIDO');
+
+    const planningSnap = experience.sourcePlanningId
+      ? await db.collection('plannings').doc(experience.sourcePlanningId).get()
+      : null;
+    const planning = planningSnap?.exists ? planningSnap.data() : { title: experience.title || 'Experiencia', purpose: experience.purpose || '', learningObjectives: experience.oa || [] };
+    const sourceRef = { sourceType: experience.sourceType, sourceActivityId: experience.sourceActivityId };
+
+    const prompt = buildGamificationDraftPrompt(planning, sourceRef, 'draft');
+    const aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+    const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+    const draft = (raw && typeof raw === 'object')
+      ? await normalizeGamifiedExperience({ ...raw, oa: experience.oa, evidenceCriteria: experience.evidenceCriteria })
+      : null;
+    const draftErrors = validateGamificationDraft(raw || null);
+    if (!draft || draftErrors.length > 0) {
+      await db.collection('audit-logs').add({
+        userId, action: 'gamify_draft_error', resource: 'gamified_experience', resourceId: experienceId,
+        errors: draftErrors.length ? draftErrors : ['DRAFT_INVALIDO'], createdAt: new Date().toISOString(),
+      });
+      throw new Error('DRAFT_INVALIDO');
+    }
+
+    const now = new Date().toISOString();
+    await db.collection('gamified-experiences').doc(experienceId).update({
+      description: draft.description || experience.description,
+      narrative: draft.narrative || '',
+      activities: draft.activities || [],
+      missions: draft.missions || [],
+      rules: draft.rules || [],
+      skills: draft.skills || [],
+      attitudes: draft.attitudes || [],
+      aiContributions: [{ model: aiResult.model, provider: aiResult.provider, generatedAt: now }],
+      version: (experience.version || 0) + 1,
+      updatedAt: now,
+    });
+    await db.collection('gamification-audit-logs').add({
+      expId: experienceId, action: 'gamify_draft', createdAt: now, uid: userId,
+    });
+    await db.collection('ai-costs').add({
+      userId, date: now.split('T')[0], provider: aiResult.provider, model: aiResult.model,
+      inputTokens: aiResult.inputTokens, outputTokens: aiResult.outputTokens, cost: aiResult.cost,
+      expId: experienceId, action: 'gamify_draft', result: 'success',
+    });
+    await db.collection('gamification-costs').add({
+      expId: experienceId, functionType: 'gamificacion', provider: aiResult.provider, model: aiResult.model,
+      tokensIn: aiResult.inputTokens, tokensOut: aiResult.outputTokens, cost: aiResult.cost,
+      date: now.split('T')[0], uid: userId, result: 'success',
+    });
+    await recordBudgetUsage(aiResult.cost);
+
+    return { draft: validateGamifiedExperience(draft), status: 'ok' };
+  }
+);
+
+// U7: regenera UNA sección permitida de la experiencia (whitelist + protecciones B1).
+export const regenerateGamificationSection = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { experienceId, section, instruction } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId || !section || !isRegenerableGamificationSection(section)) throw new Error('SECCION_INVALIDA');
+
+    const expSnap = await db.collection('gamified-experiences').doc(experienceId).get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    if (experience.authorUid !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const current = experience[section];
+    const prompt = buildGamificationSectionPrompt(section, current, instruction || '');
+    const aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+    const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+    const newContent = (section === 'missions')
+      ? ((Array.isArray(raw) ? raw : raw?.missions) || []).map((mission, index) => normalizeGamifiedExperience({ missions: [mission] }).missions[0])
+      : raw;
+    if (!newContent || (Array.isArray(newContent) && newContent.length === 0)) throw new Error('SECCION_INVALIDA');
+
+    const now = new Date().toISOString();
+    const update = { [section]: newContent, updatedAt: now };
+    await db.collection('gamified-experiences').doc(experienceId).update(update);
+    await db.collection('gamification-audit-logs').add({
+      expId: experienceId, action: 'gamify_regenerate', data: { section }, createdAt: now, uid: userId,
+    });
+    await db.collection('ai-costs').add({
+      userId, date: now.split('T')[0], provider: aiResult.provider, model: aiResult.model,
+      inputTokens: aiResult.inputTokens, outputTokens: aiResult.outputTokens, cost: aiResult.cost,
+      expId: experienceId, action: 'gamify_regenerate', result: 'success', section,
+    });
+    await db.collection('gamification-costs').add({
+      expId: experienceId, functionType: 'gamificacion', provider: aiResult.provider, model: aiResult.model,
+      tokensIn: aiResult.inputTokens, tokensOut: aiResult.outputTokens, cost: aiResult.cost,
+      date: now.split('T')[0], uid: userId, result: 'success',
+    });
+    await recordBudgetUsage(aiResult.cost);
+
+    return { section, content: newContent, status: 'ok' };
   }
 );
 

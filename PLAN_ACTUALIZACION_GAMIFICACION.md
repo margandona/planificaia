@@ -1110,8 +1110,22 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U6 — Modelo de gamificación
 - Colecciones de la sección 36 + schemas + `validateGamifiedExperience` (motor de reglas).
 
+**Cierre (2026-08-10):** modelo de gamificación y verificador puro implementados.
+- **Schemas y normalización:** enums estables para estado, modo, origen, tipos de misión y eventos; `normalizeMission`, `normalizeExperienceRule` y `normalizeGamifiedExperience` sanitizan contenido y aplican defaults seguros.
+- **Motor de reglas:** `validateGamifiedExperience` detecta campos pedagógicos faltantes, misiones duplicadas/incompletas, puntos negativos, dependencias inaccesibles, ciclos de desbloqueo, reglas duplicadas/eventos inválidos y condiciones de progreso insuficientes.
+- **Reglas Firestore:** experiencia raíz con acceso owner/org, versiones/misiones/reglas protegidas, participantes/evidencias/feedback/costos/auditoría solo por Functions y catálogo `badges` público/admin.
+- **Retención:** experiencias y costos de gamificación a 2 años; auditoría a 1 año.
+- **Verificación:** `pnpm --dir functions test:unit` 151/151; `node --check` en `logic.js` e `index.test.js`.
+
 ### Fase U7 — Constructor de gamificaciones
 - `createGamifiedExperience`, `generateGamificationDraft`, `regenerateGamificationSection` (whitelist), editor de experiencia. Flag `gamificationModuleEnabled`.
+
+**Cierre (2026-08-10):** constructor nativo de experiencias gamificadas implementado.
+- **Callables (0/1 IA, sin sobrescribir la fuente):** `createGamifiedExperience` (extrae contexto OA/propósito/criterios según `sourceType` y crea `gamified-experiences` draft con nivel `estructure` o `draft`), `generateGamificationDraft` (borrador IA validado contra el schema, persiste misión/rules/narrativa y versiona), `regenerateGamificationSection` (whitelist `ALLOWED_GAMIFICATION_SECTIONS` + protección B1: jamás metadatos/estado; error `SECCION_INVALIDA`). Todos con flag `gamificationModuleEnabled`, costos en `ai-costs`+`gamification-costs`+`budget-usage` y auditoría `gamify_create`/`gamify_draft`/`gamify_regenerate`.
+- **Lógica pura en `logic.js`:** `buildGamificationSourceContext`, `buildGamificationDraftPrompt` y `buildGamificationSectionPrompt` (guard anti-inyección, PII sanitizada), `validateGamificationDraft`, `GAMIFICATION_INTENSITY_LEVELS`.
+- **Frontend:** ruta `#/gamificaciones` con página editora (`gamificaciones.js`): listar experiencias propias, convertir planificación (fuente/tipo/intensidad), generar borrador IA y regenerar secciones por whitelist.
+- **Reglas Firestore y retención:** colecciones `gamified-experiences` (subcolecciones versiones/misiones/reglas), `badges` público/admin, participantes/progreso/evidencia/feedback y costos/auditoría solo Functions; retención de experiencias y costos a 2 años y auditoría a 1 año.
+- **Verificación:** `pnpm --dir functions test:unit` 156/156; `node --check` en `logic.js`, `index.js`, `index.test.js`, `core.js`, `gamificaciones.js` y `app.js`.
 
 ### Fase U8 — Portal del participante
 - `joinGamifiedExperience`, modo invitado/equipos/presentación; página participante (hosting); código + QR.
