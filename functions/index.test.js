@@ -20,6 +20,9 @@ import {
   hasFeedbackStrategy,
   VALIDATION_RULES,
   METHODOLOGY_KEYWORDS,
+  METHODOLOGY_CATALOG,
+  resolveMethodologyCode,
+  resolveMethodologyFamily,
   sanitizeInput,
   PROMPT_INJECTION_PATTERNS,
   detectPromptInjection,
@@ -923,5 +926,81 @@ describe('U0 B1 - Whitelist de secciones regenerables', () => {
     expect(isRegenerableSection(null)).toBe(false);
     expect(isRegenerableSection(123)).toBe(false);
     expect(isRegenerableSection(undefined)).toBe(false);
+  });
+});
+
+describe('U2 - Catalogo metodologico', () => {
+  test('contiene las 17 metodologias + PVISIBLE con codigos unicos', () => {
+    const codes = METHODOLOGY_CATALOG.map(m => m.code);
+    expect(new Set(codes).size).toBe(codes.length);
+    expect(codes).toContain('ABPROY');
+    expect(codes).toContain('ABPROB');
+    expect(codes).toContain('ABJ');
+    expect(codes).toContain('APS');
+    expect(codes).toContain('GAM');
+    expect(codes).toContain('ACOOP');
+    expect(codes).toContain('IND');
+    expect(codes).toContain('EC');
+    expect(codes).toContain('SIM');
+    expect(codes).toContain('RETOS');
+    expect(codes).toContain('AULA_INV');
+    expect(codes).toContain('ESTACIONES');
+    expect(codes).toContain('FUENTES');
+    expect(codes).toContain('DEBATE');
+    expect(codes).toContain('DIRECTA');
+    expect(codes).toContain('MIXTA');
+    expect(codes).toContain('PVISIBLE');
+    expect(codes.length).toBe(17);
+  });
+
+  test('cada entrada del catalogo tiene los campos obligatorios de la seccion 36', () => {
+    const required = ['code', 'name', 'legacyKeys', 'description', 'prerequisites', 'minDuration', 'maxDuration', 'minSessions', 'resourceRequired', 'groupWork', 'complexity', 'teacherLoad', 'studentLoad', 'gamificationPossible', 'techDependencies', 'offlineAlternative', 'securityConstraints', 'ageMin', 'accessibilityNotes', 'evidenceTypes'];
+    for (const m of METHODOLOGY_CATALOG) {
+      for (const f of required) {
+        expect(m[f]).toBeDefined();
+      }
+    }
+  });
+
+  test('resolveMethodologyCode mapea legacyKeys a codigos nuevos', () => {
+    expect(resolveMethodologyCode('abp')).toBe('ABPROY');
+    expect(resolveMethodologyCode('proyecto')).toBe('ABPROY');
+    expect(resolveMethodologyCode('dialogada')).toBe('DIRECTA');
+    expect(resolveMethodologyCode('cooperativo')).toBe('ACOOP');
+    expect(resolveMethodologyCode('gamificacion')).toBe('GAM');
+    expect(resolveMethodologyCode('indagacion')).toBe('IND');
+    expect(resolveMethodologyCode('pensamiento-visible')).toBe('PVISIBLE');
+  });
+
+  test('resolveMethodologyCode acepta codigos y nombres exactos', () => {
+    expect(resolveMethodologyCode('ABJ')).toBe('ABJ');
+    expect(resolveMethodologyCode('Estudio de Casos')).toBe('EC');
+    expect(resolveMethodologyCode('DESCONOCIDO')).toBeNull();
+    expect(resolveMethodologyCode('')).toBeNull();
+    expect(resolveMethodologyCode(null)).toBeNull();
+  });
+
+  test('resolveMethodologyFamily devuelve familia de keywords valida', () => {
+    expect(resolveMethodologyFamily('ABPROY')).toBe('proyecto');
+    expect(resolveMethodologyFamily('ABPROB')).toBe('abp');
+    expect(resolveMethodologyFamily('cooperativo')).toBe('cooperativ');
+    expect(resolveMethodologyFamily('GAM')).toBe('gam');
+    expect(resolveMethodologyFamily('PVISIBLE')).toBe('pvisible');
+    expect(resolveMethodologyFamily('MIXTA')).toBeNull();
+    expect(resolveMethodologyFamily('nada')).toBeNull();
+  });
+
+  test('V-013 reconoce codigos nuevos del catalogo', () => {
+    const rule = VALIDATION_RULES.find(r => r.id === 'V-013');
+    const good = { type: 'unit', methodologies: ['ABPROY', 'ACOOP'], purpose: 'Investigan un problema en equipos cooperativos', unit: { classes: [{ title: 'Proyectan la solucion', purpose: 'Trabajan en equipos' }] } };
+    expect(rule.check(good)).toBe(true);
+    const bad = { type: 'unit', methodologies: ['ABPROY', 'ACOOP'], purpose: 'Escuchan la explicacion del docente', unit: { classes: [{ title: 'Copian de la pizarra', purpose: 'Responden individualmente' }] } };
+    expect(rule.check(bad)).toBe(false);
+  });
+
+  test('V-013 no aplica a MIXTA (combinacion docente justificada)', () => {
+    const rule = VALIDATION_RULES.find(r => r.id === 'V-013');
+    const p = { type: 'class', methodology: 'MIXTA', purpose: 'Solo una clase expositiva', activities: [{ description: 'Escuchan y copian' }] };
+    expect(rule.check(p)).toBe(true);
   });
 });

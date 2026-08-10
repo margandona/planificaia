@@ -1064,6 +1064,13 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 - `methodology-catalog` (17 + `PVISIBLE`), seed idempotente, campos `legacyKeys`, mapeo V-013.
 - **Pruebas:** catálogo + mapeo + compatibilidad con `METHODOLOGY_KEYWORDS`.
 
+**Cierre (2026-08-10):** catálogo implementado con código puro en `functions/logic.js`.
+- **`METHODOLOGY_CATALOG`:** 17 códigos estables + `PVISIBLE`, con todos los campos de la sección 36 (`legacyKeys`, `description`, `prerequisites`, `minDuration`, `maxDuration`, `minSessions`, `resourceRequired`, `groupWork`, `complexity`, `teacherLoad`, `studentLoad`, `gamificationPossible`, `techDependencies`, `offlineAlternative`, `securityConstraints`, `ageMin`, `accessibilityNotes`, `evidenceTypes`).
+- **Resolución:** `resolveMethodologyCode` mapea valores legacy (`abp` → `ABPROY`/`ABPROB`, `dialogada` → `DIRECTA`, `cooperativo` → `ACOOP`, `gamificacion` → `GAM`, `indagacion` → `IND`, `pensamiento-visible` → `PVISIBLE`) y nombres exactos a códigos del catálogo; `resolveMethodologyFamily` asocia cada código a su familia de keywords.
+- **V-013 extendido:** valida coherencia con códigos nuevos vía `resolveMethodologyFamily` (sin romper tests legacy). `MIXTA` se excluye de la verificación (combinación justificada por el docente); `PVISIBLE` se conserva como etiqueta auxiliar.
+- **Seed:** `scripts/seed-methodology-catalog.mjs` idempotente (docs deterministas `methodology-catalog/{code}`), reutiliza `METHODOLOGY_CATALOG` de `logic.js` como fuente única.
+- **Verificación:** `pnpm --dir functions test:unit` 116/116 (7 tests nuevos de U2); `node --check` en `logic.js`, `index.test.js` y el seed; `eval-batch.mjs` sin errores. Pendiente: ejecutar el seed contra producción (requiere `FIREBASE_SA_PATH`).
+
 ### Fase U3 — Contexto ampliado
 - Campos opcionales del paso 3; `resource-profiles`, `territorial-contexts`, `tp-contexts`; UI colapsable. Flags `tpContextEnabled`/`localContextEnabled`/`methodologyRecommendationsEnabled`.
 

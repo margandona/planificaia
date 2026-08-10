@@ -157,8 +157,8 @@ export const VALIDATION_RULES = [
       : (p.methodology ? [p.methodology] : []);
     if (declared.length === 0) return true;
     const families = declared
-      .map(m => Object.keys(METHODOLOGY_KEYWORDS).find(k => String(m).toLowerCase().includes(k)))
-      .filter(Boolean);
+      .map(m => resolveMethodologyFamily(m))
+      .filter(f => f && METHODOLOGY_KEYWORDS[f] && METHODOLOGY_KEYWORDS[f].length > 0);
     if (families.length === 0) return true;
     const text = [
       ...(p.activities || []).map(a => `${a.description || ''} ${a.title || ''}`),
@@ -207,7 +207,302 @@ export const METHODOLOGY_KEYWORDS = {
   'juego': ['juego', 'jug', 'dinamica'],
   'expositiv': ['expone', 'presenta', 'explic'],
   'montessori': ['material', 'montessori', 'autonomia', 'manipul'],
+  'gam': ['gamific', 'puntos', 'insignia', 'mision', 'nivel', 'recompensa'],
+  'pvisible': ['pensamiento', 'visible', 'rutina', 'organizador', 'piensa'],
+  'aps': ['servicio', 'comunidad', 'beneficio', 'aporte', 'voluntariad'],
+  'casos': ['caso', 'situacion', 'analiza', 'estudio de caso'],
+  'simulacion': ['simulac', 'escenario', 'representa', 'rol', 'juego de roles'],
+  'retos': ['reto', 'desafio', 'mision', 'problema abierto'],
+  'aula-inv': ['invertida', 'en casa', 'video', 'anticipa', 'prepara en casa'],
+  'estaciones': ['estacion', 'rotacion', 'circuito', 'perimetro'],
+  'fuentes': ['fuente', 'documento', 'primaria', 'archivo', 'testimonio'],
+  'debate': ['debate', 'argumenta', 'postura', 'contraargumenta', 'foro'],
 };
+
+// ─── CATÁLOGO METODOLÓGICO (U2) ─────────────────────────
+// Códigos estables (sección 13 del plan); en la interfaz se muestran nombres
+// completos, nunca solo la sigla. `legacyKeys` mantiene retrocompatibilidad con
+// los valores actuales del paso 4 del wizard. `family` asocia a METHODOLOGY_KEYWORDS
+// para V-013 (null = sin verificación de coherencia, p. ej. MIXTA o auxiliares).
+export const METHODOLOGY_CATALOG = [
+  {
+    code: 'ABPROY',
+    name: 'Aprendizaje Basado en Proyectos',
+    legacyKeys: ['abp', 'proyecto'],
+    family: 'proyecto',
+    description: 'Los estudiantes desarrollan un producto o solución mediante un proyecto que integra los OA.',
+    prerequisites: 'Capacidad de trabajo sostenido; se sugiere dominio de lectoescritura básica.',
+    minDuration: 90, maxDuration: 540, minSessions: 4,
+    resourceRequired: false, groupWork: true, complexity: 4,
+    teacherLoad: 4, studentLoad: 4, gamificationPossible: true,
+    techDependencies: ['proyector'], offlineAlternative: 'Cartulinas y materiales de papelería',
+    securityConstraints: [], ageMin: 8,
+    accessibilityNotes: 'Desglosar el proyecto en etapas cortas y con apoyos visuales.',
+    evidenceTypes: ['producto', 'presentacion', 'rúbrica de proyecto'],
+  },
+  {
+    code: 'ABPROB',
+    name: 'Aprendizaje Basado en Problemas',
+    legacyKeys: ['abp'],
+    family: 'abp',
+    description: 'Se presenta un problema auténtico y el grupo investiga para proponer soluciones fundamentadas.',
+    prerequisites: 'Ninguno crítico; útil tener hábitos de trabajo en equipo.',
+    minDuration: 90, maxDuration: 360, minSessions: 3,
+    resourceRequired: false, groupWork: true, complexity: 4,
+    teacherLoad: 3, studentLoad: 4, gamificationPossible: true,
+    techDependencies: ['acceso a información'], offlineAlternative: 'Material impreso y guías de investigación',
+    securityConstraints: ['verificar fuentes'], ageMin: 8,
+    accessibilityNotes: 'Entregar el problema en formato escrito y leído en voz alta.',
+    evidenceTypes: ['informe', 'propuesta de solución', 'rúbrica de análisis'],
+  },
+  {
+    code: 'ABJ',
+    name: 'Aprendizaje Basado en Juegos',
+    legacyKeys: [],
+    family: 'juego',
+    description: 'Se usan juegos (digitales o de mesa) como vehículo para lograr los OA.',
+    prerequisites: 'Disposición lúdica del grupo.',
+    minDuration: 45, maxDuration: 180, minSessions: 1,
+    resourceRequired: false, groupWork: true, complexity: 2,
+    teacherLoad: 2, studentLoad: 3, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Juegos de mesa o elaborados en papel',
+    securityConstraints: [], ageMin: 5,
+    accessibilityNotes: 'Adaptar reglas y turnos para participantes con dificultades motoras o de atención.',
+    evidenceTypes: ['observación', 'registro de juego', 'reflexión grupal'],
+  },
+  {
+    code: 'APS',
+    name: 'Aprendizaje-Servicio',
+    legacyKeys: [],
+    family: 'aps',
+    description: 'El aprendizaje se articula con un servicio concreto a la comunidad.',
+    prerequisites: 'Coordinación con una organización o comunidad local.',
+    minDuration: 120, maxDuration: 600, minSessions: 5,
+    resourceRequired: true, groupWork: true, complexity: 5,
+    teacherLoad: 4, studentLoad: 4, gamificationPossible: false,
+    techDependencies: [], offlineAlternative: 'Actividades de servicio sin tecnología',
+    securityConstraints: ['autorización de salidas', 'supervisión adulta'], ageMin: 10,
+    accessibilityNotes: 'Asegurar roles accesibles dentro del servicio para todos los participantes.',
+    evidenceTypes: ['registro de servicio', 'reflexión', 'evidencia comunitaria'],
+  },
+  {
+    code: 'GAM',
+    name: 'Gamificación',
+    legacyKeys: ['gamificacion'],
+    family: 'gam',
+    description: 'Elementos de juego (puntos, niveles, insignias) aplicados a tareas de aprendizaje.',
+    prerequisites: 'Ninguno crítico.',
+    minDuration: 45, maxDuration: 360, minSessions: 2,
+    resourceRequired: false, groupWork: false, complexity: 3,
+    teacherLoad: 3, studentLoad: 2, gamificationPossible: true,
+    techDependencies: ['dispositivos opcionales'], offlineAlternative: 'Tableros físicos y tarjetas de puntos',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Evitar que la competencia perjudique a participantes con ansiedad; ofrecer metas individuales.',
+    evidenceTypes: ['puntos', 'insignias', 'registro de progreso'],
+  },
+  {
+    code: 'ACOOP',
+    name: 'Aprendizaje Cooperativo',
+    legacyKeys: ['cooperativo', 'cooperativ'],
+    family: 'cooperativ',
+    description: 'Grupos heterogéneos con roles definidos que trabajan hacia una meta común.',
+    prerequisites: 'Ninguno crítico.',
+    minDuration: 45, maxDuration: 300, minSessions: 2,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 3, studentLoad: 3, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Trabajo colaborativo sin tecnología',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Definir roles rotativos accesibles a cada participante.',
+    evidenceTypes: ['observación', 'producto grupal', 'coevaluación'],
+  },
+  {
+    code: 'IND',
+    name: 'Indagación',
+    legacyKeys: ['indagacion'],
+    family: 'abp',
+    description: 'Preguntas guía llevan a los estudiantes a observar, preguntar e investigar.',
+    prerequisites: 'Curiosidad y tolerancia a la incertidumbre.',
+    minDuration: 60, maxDuration: 300, minSessions: 2,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 3, studentLoad: 3, gamificationPossible: true,
+    techDependencies: ['acceso a información'], offlineAlternative: 'Observación directa y materiales concretos',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Apoyar la formulación de preguntas con organizadores gráficos.',
+    evidenceTypes: ['bitácora', 'preguntas de investigación', 'hallazgos'],
+  },
+  {
+    code: 'EC',
+    name: 'Estudio de Casos',
+    legacyKeys: [],
+    family: 'casos',
+    description: 'Análisis de un caso real o ficticio para aplicar conceptos y decidir.',
+    prerequisites: 'Capacidad de análisis y discusión.',
+    minDuration: 60, maxDuration: 240, minSessions: 2,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 2, studentLoad: 3, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Casos en formato impreso',
+    securityConstraints: ['anonimizar datos reales'], ageMin: 10,
+    accessibilityNotes: 'Resumir el caso y acompañarlo de apoyos visuales.',
+    evidenceTypes: ['análisis escrito', 'discusión guiada', 'decisión fundamentada'],
+  },
+  {
+    code: 'SIM',
+    name: 'Simulación',
+    legacyKeys: [],
+    family: 'simulacion',
+    description: 'Escenarios simulados (rol, laboratorio, fenómenos) para practicar sin riesgos.',
+    prerequisites: 'Instrucciones claras de roles y límites.',
+    minDuration: 60, maxDuration: 240, minSessions: 1,
+    resourceRequired: true, groupWork: true, complexity: 3,
+    teacherLoad: 3, studentLoad: 3, gamificationPossible: true,
+    techDependencies: ['simuladores o dispositivos'], offlineAlternative: 'Juego de roles en aula',
+    securityConstraints: ['seguridad en laboratorio'], ageMin: 8,
+    accessibilityNotes: 'Ofrecer roles alternativos que no dependan de habilidades específicas.',
+    evidenceTypes: ['desempeño en simulación', 'reflexión', 'rúbrica de roles'],
+  },
+  {
+    code: 'RETOS',
+    name: 'Aprendizaje Basado en Retos',
+    legacyKeys: [],
+    family: 'retos',
+    description: 'Un desafío abierto y motivador organiza el aprendizaje hacia una solución.',
+    prerequisites: 'Tolerancia a la incertidumbre.',
+    minDuration: 90, maxDuration: 480, minSessions: 3,
+    resourceRequired: false, groupWork: true, complexity: 4,
+    teacherLoad: 3, studentLoad: 4, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Retos resueltos con materiales del entorno',
+    securityConstraints: [], ageMin: 8,
+    accessibilityNotes: 'Fragmentar el reto en metas parciales verificables.',
+    evidenceTypes: ['solución al reto', 'proceso documentado', 'autoevaluación'],
+  },
+  {
+    code: 'AULA_INV',
+    name: 'Aula Invertida',
+    legacyKeys: [],
+    family: 'aula-inv',
+    description: 'La exposición de contenidos se estudia en casa y el tiempo de clase se dedica a aplicar.',
+    prerequisites: 'Acceso a los materiales en casa.',
+    minDuration: 45, maxDuration: 180, minSessions: 2,
+    resourceRequired: true, groupWork: false, complexity: 3,
+    teacherLoad: 3, studentLoad: 2, gamificationPossible: false,
+    techDependencies: ['acceso a video o lectura en casa'], offlineAlternative: 'Lectura impresa anticipada',
+    securityConstraints: [], ageMin: 10,
+    accessibilityNotes: 'Verificar el acceso previo; ofrecer resumen en aula para quien no pudo prepararlo.',
+    evidenceTypes: ['preparación previa', 'aplicación en clase', 'verificación de comprensión'],
+  },
+  {
+    code: 'ESTACIONES',
+    name: 'Estaciones de aprendizaje',
+    legacyKeys: [],
+    family: 'estaciones',
+    description: 'Rotación por estaciones con tareas diferenciadas que abordan los mismos OA.',
+    prerequisites: 'Espacio organizable en rincones o mesas.',
+    minDuration: 60, maxDuration: 240, minSessions: 1,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 3, studentLoad: 3, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Estaciones completamente analógicas',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Asegurar que cada estación tenga al menos una vía accesible.',
+    evidenceTypes: ['registro de estaciones', 'producto por estación', 'observación'],
+  },
+  {
+    code: 'FUENTES',
+    name: 'Trabajo con fuentes',
+    legacyKeys: [],
+    family: 'fuentes',
+    description: 'Análisis crítico de fuentes primarias y secundarias para construir conocimiento.',
+    prerequisites: 'Alfabetización básica en lectura de documentos.',
+    minDuration: 60, maxDuration: 240, minSessions: 2,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 2, studentLoad: 3, gamificationPossible: false,
+    techDependencies: ['acceso a fuentes digitales (opcional)'], offlineAlternative: 'Fuentes impresas y archivos locales',
+    securityConstraints: ['verificar origen'], ageMin: 8,
+    accessibilityNotes: 'Incluir versiones adaptadas o audio de las fuentes.',
+    evidenceTypes: ['análisis de fuente', 'contraposición de versiones', 'cita fundamentada'],
+  },
+  {
+    code: 'DEBATE',
+    name: 'Debate estructurado',
+    legacyKeys: [],
+    family: 'debate',
+    description: 'Defensa argumentada de posturas sobre un tema, con reglas de respeto y turnos.',
+    prerequisites: 'Normas claras de respeto y escucha.',
+    minDuration: 45, maxDuration: 180, minSessions: 1,
+    resourceRequired: false, groupWork: true, complexity: 3,
+    teacherLoad: 2, studentLoad: 3, gamificationPossible: false,
+    techDependencies: [], offlineAlternative: 'Debate completamente oral',
+    securityConstraints: ['temas sensibles supervisados'], ageMin: 8,
+    accessibilityNotes: 'Permitir argumentos escritos para participantes que prefieran esa vía.',
+    evidenceTypes: ['rúbrica de argumentación', 'participación', 'reflexión final'],
+  },
+  {
+    code: 'DIRECTA',
+    name: 'Enseñanza explícita / instrucción directa',
+    legacyKeys: ['dialogada', 'expositiv'],
+    family: 'expositiv',
+    description: 'Exposición estructurada del docente con modelado, práctica guiada e independiente.',
+    prerequisites: 'Ninguno crítico.',
+    minDuration: 30, maxDuration: 180, minSessions: 1,
+    resourceRequired: false, groupWork: false, complexity: 1,
+    teacherLoad: 2, studentLoad: 1, gamificationPossible: false,
+    techDependencies: ['proyector (opcional)'], offlineAlternative: 'Pizarra y material impreso',
+    securityConstraints: [], ageMin: 4,
+    accessibilityNotes: 'Combinar con momentos activos y chequeos de comprensión frecuentes.',
+    evidenceTypes: ['práctica guiada', 'chequeo de comprensión', 'tarea de aplicación'],
+  },
+  {
+    code: 'MIXTA',
+    name: 'Combinación metodológica justificada',
+    legacyKeys: [],
+    family: null,
+    description: 'Combinación deliberada de dos o más metodologías, justificada pedagógicamente por el docente.',
+    prerequisites: 'Justificación explícita por parte del docente.',
+    minDuration: 45, maxDuration: 600, minSessions: 1,
+    resourceRequired: false, groupWork: false, complexity: 4,
+    teacherLoad: 4, studentLoad: 3, gamificationPossible: true,
+    techDependencies: [], offlineAlternative: 'Según las metodologías combinadas',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Asegurar que la combinación no añada barreras de comprensión.',
+    evidenceTypes: ['justificación docente', 'observación', 'reflexión'],
+  },
+  {
+    code: 'PVISIBLE',
+    name: 'Pensamiento Visible',
+    legacyKeys: ['pensamiento-visible'],
+    family: 'pvisible',
+    description: 'Rutinas de pensamiento que hacen visible el proceso cognitivo (organizadores, preguntas).',
+    prerequisites: 'Ninguno crítico.',
+    minDuration: 30, maxDuration: 120, minSessions: 1,
+    resourceRequired: false, groupWork: false, complexity: 2,
+    teacherLoad: 2, studentLoad: 2, gamificationPossible: false,
+    techDependencies: [], offlineAlternative: 'Organizadores gráficos impresos',
+    securityConstraints: [], ageMin: 6,
+    accessibilityNotes: 'Rutinas cortas y visuales; auxiliar de otras metodologías, no método primario.',
+    evidenceTypes: ['rutina de pensamiento', 'organizador', 'reflexión'],
+  },
+];
+
+// Resuelve cualquier valor declarado (código, legacyKey o nombre) a un código
+// del catálogo. Devuelve null si no hay coincidencia.
+export function resolveMethodologyCode(value) {
+  if (!value) return null;
+  const norm = String(value).trim().toLowerCase();
+  const byCode = METHODOLOGY_CATALOG.find(m => m.code.toLowerCase() === norm);
+  if (byCode) return byCode.code;
+  const byLegacy = METHODOLOGY_CATALOG.find(m => (m.legacyKeys || []).some(k => String(k).toLowerCase() === norm));
+  if (byLegacy) return byLegacy.code;
+  const byName = METHODOLOGY_CATALOG.find(m => m.name.toLowerCase() === norm);
+  return byName ? byName.code : null;
+}
+
+// Mapea una metodología declarada a su familia de keywords (V-013).
+// Retorna null cuando no aplica verificación de coherencia.
+export function resolveMethodologyFamily(value) {
+  const code = resolveMethodologyCode(value);
+  if (code) return METHODOLOGY_CATALOG.find(m => m.code === code).family;
+  const norm = String(value || '').toLowerCase();
+  return Object.keys(METHODOLOGY_KEYWORDS).find(k => norm.includes(k)) || null;
+}
 
 // ─── HELPERS ────────────────────────────────────────────
 
