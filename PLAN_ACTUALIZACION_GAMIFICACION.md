@@ -1179,6 +1179,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U17 — Despliegue gradual
 - Feature flags, pilotos, porcentaje, rollback.
 
+**Cierre (2026-08-11):** despliegue gradual (DEPL-01) implementado de punta a punta. **Backend puro** (`functions/logic.js`): `userFlagBucket(uid)` (hash determinista `% 100`, bucket estable 0-99 para que el usuario no "parpadee" entre activaciones) y `resolveUserFeatureFlags(source, uid)` — resuelve las flags efectivas por uid: flag global `false` = rollback/kill-switch para TODOS (incluso pilotos allowlist), `rollout: { <flag>: 0-100 }` = porcentaje por bucket (`pct 100` = todos), `allowlist: { <flag>: [uid,...] }` = pilotos siempre ON mientras la flag global sea `true`. **Backend callable**: `getFeatureFlags(uid)` en `index.js` cachea el `config/feature-flags` crudo (5 min, decisión D1), admite override de entorno `FLAG_{flag}` y resuelve por uid en cada llamada; los **12 call sites** (generatePlanning, recommendMethodologies, generateActivityVariants, gamificación, prompts externos, syncPlanningContext…) pasan `userId`. **Frontend**: espejo en `core.js` (`CLIENT_FEATURE_FLAGS`, `userFlagBucket`, `resolveUserFeatureFlags`, `loadFeatureFlags` con caché 5 min) — el `Layout` oculta "Gamificaciones" y "Prompts externos" según las flags efectivas del usuario (default apagadas = rollback visual sin romper rutas); `wizard.js` resuelve sus flags por `uid` con los helpers compartidos. **Seed idempotente** `scripts/seed-feature-flags.mjs` (flags apagadas por defecto, `--rollout <flag>=25`, `--allow <flag>=uid1,uid2`). 6 tests nuevos en `index.test.js` (determinismo/estabilidad del bucket, rollback con flag global off, allowlist override, rollout 0/100). **Unit 197/197**, E2E 13/13. Pendiente: activar flags en producción (seed) y DEPL-02.
+
 ---
 
 ## 48. Backlog
@@ -1230,7 +1232,7 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 | COST-02 | COST | `gamification-costs` + retención | Registro y purga | Retención aplicada | MUST | ESTAB-04 | S | Medio | functions | — |
 | QA-01 | QA | Tests unit/integ/E2E nuevos | Sección 46 | Todo verde + dataset ampliado | MUST | — | L | Alto | tests | — |
 | QA-02 | QA | Regresión completa | Producto existente + nuevo | Sin regresiones | MUST | QA-01 | L | Alto | — | — |
-| DEPL-01 | DEPL | Feature flags + despliegue gradual | U17 | Rollback flag | MUST | QA-02 | S | Alto | config | todos |
+| DEPL-01 | DEPL | Feature flags + despliegue gradual | U17 | Rollback flag | MUST | QA-02 | S | Alto | config | todos | ✅ |
 | DEPL-02 | DEPL | Piloto docente | Experiencias reales + feedback | Métricas recogidas | MUST | DEPL-01 | L | Medio | — | — |
 
 ---

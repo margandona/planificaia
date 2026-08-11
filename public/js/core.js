@@ -165,6 +165,59 @@ const syncPlanningContextFn = httpsCallable(fx, 'syncPlanningContext');
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
 
+// ──────────── Feature flags (U3) + despliegue gradual (U17) ────────────
+// Espejo en cliente de functions/logic.js (FEATURE_FLAGS/resolveUserFeatureFlags):
+// el wizard y el Layout resuelven las flags efectivas por usuario leyendo el doc
+// público config/feature-flags. Rollout: bucket determinista por uid (0-99).
+const CLIENT_FEATURE_FLAGS = {
+  methodologyRecommendationsEnabled: false,
+  gamificationModuleEnabled: false,
+  externalPromptGeneratorEnabled: false,
+  tpContextEnabled: false,
+  localContextEnabled: false,
+};
+
+const userFlagBucket = (uid = '') => {
+  let h = 0;
+  const s = String(uid || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 100;
+};
+
+const resolveUserFeatureFlags = (source = {}, uid = '') => {
+  const out = {};
+  for (const key of Object.keys(CLIENT_FEATURE_FLAGS)) {
+    if (source[key] !== true) { out[key] = false; continue; }
+    const allowed = Array.isArray(source.allowlist?.[key]) ? source.allowlist[key].map(String) : [];
+    if (uid && allowed.includes(String(uid))) { out[key] = true; continue; }
+    const pct = source.rollout?.[key];
+    if (typeof pct === 'number' && pct >= 0 && pct <= 100) {
+      out[key] = pct >= 100 || userFlagBucket(uid) < pct;
+    } else {
+      out[key] = true;
+    }
+  }
+  return out;
+};
+
+// Lee config/feature-flags (doc único público) con caché de 5 minutos.
+let featureFlagsDoc = null;
+let featureFlagsDocAt = 0;
+const FEATURE_FLAGS_DOC_CACHE_MS = 5 * 60 * 1000;
+
+async function loadFeatureFlags() {
+  const now = Date.now();
+  if (featureFlagsDoc && now - featureFlagsDocAt < FEATURE_FLAGS_DOC_CACHE_MS) return featureFlagsDoc;
+  try {
+    const snap = await getDoc(doc(db, 'config', 'feature-flags'));
+    featureFlagsDoc = snap.exists() ? (snap.data() || {}) : {};
+  } catch (e) {
+    featureFlagsDoc = {};
+  }
+  featureFlagsDocAt = now;
+  return featureFlagsDoc;
+}
+
 // ──────────── Términos y privacidad versionados (S-6 / RF-013) ────────────
 
 // Versión vigente. Al publicar una versión nueva se fuerza re-aceptación en el
@@ -306,6 +359,14 @@ const Layout = defineComponent({
   props: ['title', 'subtitle', 'noWrapper'],
   setup(props, { slots }) {
     const logout = async () => { await signOut(auth); store.user = null; store.profile = null; store.org = null; store.orgRole = null; store.claims = null; go('/'); };
+    // U17 (DEPL-01): flags efectivas por usuario para el menú (rollout/allowlist).
+    const userFlags = ref({ ...CLIENT_FEATURE_FLAGS });
+    onMounted(async () => {
+      try {
+        const doc = await loadFeatureFlags();
+        userFlags.value = resolveUserFeatureFlags(doc, store.user?.uid || '');
+      } catch (e) { /* flags apagadas por defecto */ }
+    });
 
     return () => h('div', { class: 'min-h-screen flex flex-col' }, [
       // Enlace de salto al contenido (WCAG 2.4.1 Bypass Blocks)
@@ -323,8 +384,8 @@ const Layout = defineComponent({
           ] : [
             !store.user.emailVerified ? h('span', { class: 'inline-block w-2 h-2 bg-amber-400 rounded-full', title: 'Correo no verificado' }) : null,
             h('a', { href: '#/dashboard', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Dashboard'),
-            h('a', { href: '#/gamificaciones', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Gamificaciones'),
-            h('a', { href: '#/prompts-externos', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Prompts externos'),
+            userFlags.value.gamificationModuleEnabled ? h('a', { href: '#/gamificaciones', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Gamificaciones') : null,
+            userFlags.value.externalPromptGeneratorEnabled ? h('a', { href: '#/prompts-externos', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Prompts externos') : null,
             (store.org || isAdmin()) ? h('a', { href: '#/institucional', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Institucional') : null,
             h('a', { href: '#/perfil', class: 'text-sm text-slate-600 hover:text-slate-900' }, store.user.displayName || store.user.email),
             h('button', { type: 'button', onClick: logout, class: 'text-sm text-red-600 hover:text-red-700' }, 'Salir'),
@@ -350,4 +411,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn, syncPlanningContextFn };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn, syncPlanningContextFn, loadFeatureFlags, resolveUserFeatureFlags };

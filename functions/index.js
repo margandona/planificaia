@@ -55,6 +55,7 @@ import {
   filterActivityVariantsByResources,
   recommendMethodologies as recommendMethodologiesEngine,
   resolveFeatureFlags,
+  resolveUserFeatureFlags,
   retentionCutoffIso,
   runPedagogicalAudit,
   sanitizeContextFields,
@@ -425,17 +426,20 @@ async function generateFromProvider(systemPrompt, userPrompt, useFallback = fals
 // ─── BUILD PLANNING OBJECT ──────────────────────────────
 
 
-// U3: feature flags leídas de config/feature-flags (doc único, admin-write) con
-// caché de 5 minutos en memoria y override por variables de entorno
+// U3/U17: feature flags leídas de config/feature-flags (doc único, admin-write)
+// con caché de 5 minutos en memoria y override por variables de entorno
 // (p. ej. FLAG_methodologyRecommendationsEnabled=true). Flags apagadas si no existen.
+// U17 (DEPL-01): el doc admite rollout { <flag>: 0-100 } y allowlist
+// { <flag>: [uid,...] } para despliegue gradual; getFeatureFlags(uid) resuelve
+// las flags efectivas de un usuario concreto (rollback = flag global false).
 let featureFlagsCache = null;
 let featureFlagsCachedAt = 0;
 const FEATURE_FLAGS_CACHE_MS = 5 * 60 * 1000;
 
-async function getFeatureFlags() {
+async function getFeatureFlags(uid = '') {
   const now = Date.now();
   if (featureFlagsCache && now - featureFlagsCachedAt < FEATURE_FLAGS_CACHE_MS) {
-    return featureFlagsCache;
+    return resolveUserFeatureFlags(featureFlagsCache, uid);
   }
   let docData = {};
   try {
@@ -448,12 +452,12 @@ async function getFeatureFlags() {
   for (const key of Object.keys(flags)) {
     const envVal = process.env[`FLAG_${key}`];
     if (envVal !== undefined && envVal !== '') {
-      flags[key] = /^(true|1|yes)$/i.test(String(envVal));
+      docData[key] = /^(true|1|yes)$/i.test(String(envVal));
     }
   }
-  featureFlagsCache = flags;
+  featureFlagsCache = docData;
   featureFlagsCachedAt = now;
-  return flags;
+  return resolveUserFeatureFlags(docData, uid);
 }
 
 // ─── CLOUD FUNCTIONS ────────────────────────────────────
@@ -596,7 +600,7 @@ async function runGeneratePlanning(request) {
 
     // 5a. U3: contexto ampliado opcional (campos del paso 3 del wizard).
     // Con las flags apagadas la extensión queda vacía y el comportamiento actual no cambia.
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     const { extension, errors } = normalizeContextExtension(sanitizedContext, flags);
     if (errors.length > 0) {
       await db.collection('audit-logs').add({
@@ -826,7 +830,7 @@ export const recommendMethodologies = onCall(
     const { context, oaIds, planningId } = request.data || {};
 
     // Flag: sin methodologyRecommendationsEnabled la función está desactivada.
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.methodologyRecommendationsEnabled) {
       throw new Error('FLAG_DESACTIVADO');
     }
@@ -963,7 +967,7 @@ export const generateActivityVariants = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, activityId, resources } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.methodologyRecommendationsEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!planningId || activityId === undefined || activityId === null) throw new Error('CONTEXTO_INCOMPLETO');
 
@@ -1045,7 +1049,7 @@ export const createGamifiedExperience = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, sourceRef, modes, intensity } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!planningId || !sourceRef || typeof sourceRef !== 'object') throw new Error('FUENTE_NO_ENCONTRADA');
     if (modes && !Array.isArray(modes)) throw new Error('MODO_INVALIDO');
@@ -1145,7 +1149,7 @@ export const generateGamificationDraft = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1216,7 +1220,7 @@ export const regenerateGamificationSection = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId, section, instruction } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId || !section || !isRegenerableGamificationSection(section)) throw new Error('SECCION_INVALIDA');
 
@@ -1433,7 +1437,7 @@ export const publishGamifiedExperience = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1473,7 +1477,7 @@ export const unpublishGamifiedExperience = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1500,7 +1504,7 @@ export const archiveGamifiedExperience = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1527,7 +1531,7 @@ export const computeExperienceProgress = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1585,7 +1589,7 @@ export const generateExternalToolPrompt = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, tool, resourceType, context } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.externalPromptGeneratorEnabled) throw new Error('FLAG_DESACTIVADO');
 
     const profile = resolveExternalToolProfile(tool);
@@ -1672,7 +1676,7 @@ export const syncPlanningContext = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags();
+    const flags = await getFeatureFlags(userId);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
     await enforceRateLimit(`pub:${userId}`, 'gamify_publish');

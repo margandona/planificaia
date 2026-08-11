@@ -603,6 +603,42 @@ export function resolveFeatureFlags(source = {}) {
   return out;
 }
 
+// U17 (DEPL-01): despliegue gradual. Bucket determinista 0-99 de un uid para
+// rollout por porcentaje: el mismo uid siempre cae en el mismo bucket (estable
+// entre llamadas), de modo que un usuario activado no "parpadea" on/off.
+export function userFlagBucket(uid = '') {
+  let h = 0;
+  const s = String(uid);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 100;
+}
+
+// U17 (DEPL-01): resuelve las flags efectivas para un uid concreto. El doc
+// config/feature-flags admite, por flag:
+//   - booleano global: false = rollback/kill switch (apaga para TODOS, incluso
+//     pilotos); true = encendida (sujeta a rollout/allowlist).
+//   - rollout: { <flag>: 0-100 } → porcentaje de usuarios con bucket < pct.
+//   - allowlist: { <flag>: [uid, ...] } → pilotos siempre ON (mientras la flag
+//     global esté en true).
+export function resolveUserFeatureFlags(source = {}, uid = '') {
+  const globalFlags = resolveFeatureFlags(source);
+  const rollout = source.rollout && typeof source.rollout === 'object' ? source.rollout : {};
+  const allowlist = source.allowlist && typeof source.allowlist === 'object' ? source.allowlist : {};
+  const out = {};
+  for (const key of Object.keys(globalFlags)) {
+    if (globalFlags[key] !== true) { out[key] = false; continue; }
+    const allowed = Array.isArray(allowlist[key]) ? allowlist[key].map(String) : [];
+    if (uid && allowed.includes(String(uid))) { out[key] = true; continue; }
+    const pct = rollout[key];
+    if (typeof pct === 'number' && pct >= 0 && pct <= 100) {
+      out[key] = pct >= 100 || userFlagBucket(uid) < pct;
+    } else {
+      out[key] = true;
+    }
+  }
+  return out;
+}
+
 // Territorio: { region, comuna, zona, actividadesProductivas[], patrimonio,
 // problemasLocales[], medioambiente[], institucionesCercanas[], organizaciones[],
 // culturales[], desafios[] } (sección 19.1). Todo texto sanitizado.

@@ -58,6 +58,8 @@ import {
   validateTermsAcceptance,
   FEATURE_FLAGS,
   resolveFeatureFlags,
+  userFlagBucket,
+  resolveUserFeatureFlags,
   TECH_AVAILABILITY_LEVELS,
   INTERNET_ACCESS_LEVELS,
   GROUP_EXPERIENCE_LEVELS,
@@ -1913,5 +1915,55 @@ describe('U16 - Piloto (métricas y feedback por módulo)', () => {
     expect(fb.text).not.toContain('<b>');
     expect(fb.text.length).toBeLessThanOrEqual(2000);
     expect(fb.missionId).toBe('m2');
+  });
+});
+
+describe('U17 - Despliegue gradual (rollout por uid y rollback por flag)', () => {
+  test('userFlagBucket es determinista y cae en 0-99', () => {
+    expect(userFlagBucket('uid-1')).toBe(userFlagBucket('uid-1'));
+    expect(userFlagBucket('uid-2')).toBeGreaterThanOrEqual(0);
+    expect(userFlagBucket('uid-2')).toBeLessThan(100);
+    expect(userFlagBucket()).toBeGreaterThanOrEqual(0);
+    expect(userFlagBucket()).toBeLessThan(100);
+  });
+
+  test('con flag global apagada la funcionalidad queda off para todos (rollback)', () => {
+    const flags = resolveUserFeatureFlags({ gamificationModuleEnabled: false, rollout: { gamificationModuleEnabled: 100 } }, 'uid-cualquiera');
+    expect(flags.gamificationModuleEnabled).toBe(false);
+  });
+
+  test('flag global true sin rollout ni allowlist habilita a todos', () => {
+    const flags = resolveUserFeatureFlags({ methodologyRecommendationsEnabled: true }, 'uid-x');
+    expect(flags.methodologyRecommendationsEnabled).toBe(true);
+    expect(flags.gamificationModuleEnabled).toBe(false);
+  });
+
+  test('rollout porcentual respeta el bucket del uid', () => {
+    // bucket determinista: pct=100 → todos; pct=0 → nadie.
+    const all = resolveUserFeatureFlags({ externalPromptGeneratorEnabled: true, rollout: { externalPromptGeneratorEnabled: 100 } }, 'uid-x');
+    const none = resolveUserFeatureFlags({ externalPromptGeneratorEnabled: true, rollout: { externalPromptGeneratorEnabled: 0 } }, 'uid-x');
+    expect(all.externalPromptGeneratorEnabled).toBe(true);
+    expect(none.externalPromptGeneratorEnabled).toBe(false);
+  });
+
+  test('allowlist de pilotos habilita aunque el rollout sea 0', () => {
+    const flags = resolveUserFeatureFlags(
+      { gamificationModuleEnabled: true, rollout: { gamificationModuleEnabled: 0 }, allowlist: { gamificationModuleEnabled: ['piloto-1'] } },
+      'piloto-1'
+    );
+    expect(flags.gamificationModuleEnabled).toBe(true);
+    // un uid no listado queda apagado con rollout 0.
+    const other = resolveUserFeatureFlags(
+      { gamificationModuleEnabled: true, rollout: { gamificationModuleEnabled: 0 }, allowlist: { gamificationModuleEnabled: ['piloto-1'] } },
+      'otro-uid'
+    );
+    expect(other.gamificationModuleEnabled).toBe(false);
+  });
+
+  test('el rollout es estable: mismo uid siempre en el mismo lado del corte', () => {
+    const source = { gamificationModuleEnabled: true, rollout: { gamificationModuleEnabled: 50 } };
+    const first = resolveUserFeatureFlags(source, 'uid-1');
+    const second = resolveUserFeatureFlags(source, 'uid-1');
+    expect(first.gamificationModuleEnabled).toBe(second.gamificationModuleEnabled);
   });
 });

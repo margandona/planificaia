@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, isAdmin, isOrgAdmin, loadFeatureFlags, resolveUserFeatureFlags } from '../core.js';
 
 // Carga diferida (S-5.4): módulo del wizard de generación con IA.
 const WizardPage = defineComponent({
@@ -9,27 +9,16 @@ const WizardPage = defineComponent({
     const oas = ref([]); const oasLoading = ref(false); const oasLoaded = ref(false); const planning = ref(null); const generating = ref(false); const error = ref('');
     const axisFilter = ref('');
     const searchQuery = ref('');
-    const featureFlags = ref({ methodologyRecommendationsEnabled: false, tpContextEnabled: false, localContextEnabled: false });
+    const featureFlags = ref({ methodologyRecommendationsEnabled: false, gamificationModuleEnabled: false, externalPromptGeneratorEnabled: false, tpContextEnabled: false, localContextEnabled: false });
     const recommendations = ref([]); const recommendationId = ref(null); const recommending = ref(false); const recommendationError = ref('');
     const flagsLoaded = ref(false);
-    let flagsCacheAt = 0;
-    let flagsCache = null;
 
     const loadFeatureFlags = async () => {
-      const now = Date.now();
-      if (flagsCache && now - flagsCacheAt < 5 * 60 * 1000) { featureFlags.value = flagsCache; flagsLoaded.value = true; return; }
       try {
-        const snap = await getDoc(doc(db, 'config', 'feature-flags'));
-        const raw = snap.exists() ? snap.data() : {};
-        flagsCache = {
-          methodologyRecommendationsEnabled: raw.methodologyRecommendationsEnabled === true,
-          tpContextEnabled: raw.tpContextEnabled === true,
-          localContextEnabled: raw.localContextEnabled === true,
-        };
-        flagsCacheAt = now;
-        featureFlags.value = flagsCache;
+        const doc = await loadFeatureFlags();
+        featureFlags.value = resolveUserFeatureFlags(doc, store.user?.uid || '');
       } catch (e) {
-        featureFlags.value = { methodologyRecommendationsEnabled: false, tpContextEnabled: false, localContextEnabled: false };
+        featureFlags.value = { methodologyRecommendationsEnabled: false, gamificationModuleEnabled: false, externalPromptGeneratorEnabled: false, tpContextEnabled: false, localContextEnabled: false };
       }
       flagsLoaded.value = true;
     };
@@ -395,7 +384,10 @@ const MULTI_METHOD_TYPES = ['unit', 'monthly', 'annual'];
 const isMultiMethod = () => MULTI_METHOD_TYPES.includes(data.type);
 const flagEnabled = (which) => which === 'tp'
   ? featureFlags.value.tpContextEnabled
-  : which === 'local' ? featureFlags.value.localContextEnabled : featureFlags.value.methodologyRecommendationsEnabled;
+  : which === 'local' ? featureFlags.value.localContextEnabled
+  : which === 'gamification' ? featureFlags.value.gamificationModuleEnabled
+  : which === 'external' ? featureFlags.value.externalPromptGeneratorEnabled
+  : featureFlags.value.methodologyRecommendationsEnabled;
     const toggleMethod = (v) => {
       const i = data.methodologies.indexOf(v);
       if (i >= 0) data.methodologies.splice(i, 1);
