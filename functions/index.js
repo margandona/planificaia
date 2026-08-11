@@ -87,7 +87,16 @@ import {
   isMissionAccessible,
   buildEvidenceRecord,
   applyEvidenceApproval,
-  buildTeacherFeedback
+  buildTeacherFeedback,
+  buildExperienceSharePayload,
+  canPublishExperience,
+  calculateExperienceProgress,
+  resolveExternalToolProfile,
+  buildExternalToolPrompt,
+  validateExternalToolPrompt,
+  buildExternalPromptPackage,
+  exportExternalPromptPackage,
+  isValidExternalPromptFormat
 } from './logic.js';
 
 export {
@@ -1380,6 +1389,214 @@ export const reviewMissionEvidence = onCall(
     await db.collection('audit-logs').add({ userId: request.auth.uid, action: 'gamify_evidence_review', resource: 'gamified_experience', resourceId: expId, evidenceId, approve, createdAt: now });
 
     return { status: approve ? 'approved' : 'rejected', evidenceId };
+  }
+);
+
+// U10: publica la experiencia (estado published) con enlace + código + QR.
+export const publishGamifiedExperience = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { experienceId } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expRef = db.collection('gamified-experiences').doc(experienceId);
+    const expSnap = await expRef.get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    const memberRole = experience.orgId ? await getMemberRole(experience.orgId, userId) : null;
+    if (experience.authorUid !== userId && !['owner', 'coordinator'].includes(memberRole)) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const gate = canPublishExperience(experience);
+    if (!gate.ok) throw new Error(gate.reason);
+
+    const now = new Date().toISOString();
+    const share = buildExperienceSharePayload(experienceId, experience);
+    await expRef.update({
+      status: 'published',
+      code: share.code,
+      shortCode: share.shortCode,
+      url: share.url,
+      qrUrl: share.qrUrl,
+      publishedAt: now,
+      updatedAt: now,
+    });
+
+    await db.collection('gamification-audit-logs').add({ expId: experienceId, action: 'gamify_publish', createdAt: now, uid: userId });
+    await db.collection('audit-logs').add({ userId, action: 'gamify_publish', resource: 'gamified_experience', resourceId: experienceId, createdAt: now });
+
+    return { ...share, status: 'published' };
+  }
+);
+
+// U10: despublica (revoca acceso de participantes; enlace deja de servir).
+export const unpublishGamifiedExperience = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const userId = request.auth.uid;
+    const { experienceId } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expRef = db.collection('gamified-experiences').doc(experienceId);
+    const expSnap = await expRef.get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    const memberRole = experience.orgId ? await getMemberRole(experience.orgId, userId) : null;
+    if (experience.authorUid !== userId && !['owner', 'coordinator'].includes(memberRole)) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const now = new Date().toISOString();
+    await expRef.update({ status: 'paused', shortCode: null, qrUrl: null, updatedAt: now });
+    await db.collection('gamification-audit-logs').add({ expId: experienceId, action: 'gamify_unpublish', createdAt: now, uid: userId });
+    await db.collection('audit-logs').add({ userId, action: 'gamify_unpublish', resource: 'gamified_experience', resourceId: experienceId, createdAt: now });
+
+    return { status: 'paused' };
+  }
+);
+
+// U10: archiva la experiencia (fin de ciclo; datos sujetos a retención).
+export const archiveGamifiedExperience = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const userId = request.auth.uid;
+    const { experienceId } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expRef = db.collection('gamified-experiences').doc(experienceId);
+    const expSnap = await expRef.get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    const memberRole = experience.orgId ? await getMemberRole(experience.orgId, userId) : null;
+    if (experience.authorUid !== userId && !['owner', 'coordinator'].includes(memberRole)) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const now = new Date().toISOString();
+    await expRef.update({ status: 'archived', shortCode: null, qrUrl: null, archivedAt: now, updatedAt: now });
+    await db.collection('gamification-audit-logs').add({ expId: experienceId, action: 'gamify_archive', createdAt: now, uid: userId });
+    await db.collection('audit-logs').add({ userId, action: 'gamify_archive', resource: 'gamified_experience', resourceId: experienceId, createdAt: now });
+
+    return { status: 'archived' };
+  }
+);
+
+// U10: calcula agregados de progreso para el panel del docente (31, sin ranking).
+export const computeExperienceProgress = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const userId = request.auth.uid;
+    const { experienceId } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expSnap = await db.collection('gamified-experiences').doc(experienceId).get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    const memberRole = experience.orgId ? await getMemberRole(experience.orgId, userId) : null;
+    if (experience.authorUid !== userId && !['owner', 'coordinator'].includes(memberRole)) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const participantsSnap = await db.collection('gamified-experiences').doc(experienceId).collection('participants').limit(500).get();
+    const participants = participantsSnap.docs.map(p => p.data());
+
+    return {
+      experienceId,
+      ...calculateExperienceProgress(participants, experience.missions || []),
+    };
+  }
+);
+
+// U11: genera un prompt específico para una herramienta externa verificada.
+export const generateExternalToolPrompt = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { planningId, tool, resourceType, context } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.externalPromptGeneratorEnabled) throw new Error('FLAG_DESACTIVADO');
+
+    const profile = resolveExternalToolProfile(tool);
+    if (!profile) throw new Error('HERRAMIENTA_NO_VERIFICADA');
+
+    const planningSnap = planningId
+      ? await db.collection('plannings').doc(planningId).get()
+      : null;
+    if (planningId && !planningSnap.exists) throw new Error('FUENTE_NO_ENCONTRADA');
+    const planning = planningSnap?.exists ? planningSnap.data() : null;
+    if (planning && planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const prompt = buildExternalToolPrompt(planning || {}, profile, resourceType, context || {});
+    const aiResult = await generateFromProvider(prompt.system, prompt.user, request.data?.useFallback || false);
+    const raw = typeof aiResult.content === 'string' ? extractJson(aiResult.content) : aiResult.content;
+    const errors = validateExternalToolPrompt(raw || null);
+    if (errors.length > 0 || !raw) {
+      await db.collection('audit-logs').add({
+        userId, action: 'prompt_generate_error', resource: 'external_prompt', tool,
+        errors: errors.length ? errors : ['PROMPT_INVALIDO'], createdAt: new Date().toISOString(),
+      });
+      throw new Error('PROMPT_INVALIDO');
+    }
+
+    const now = new Date().toISOString();
+    const docRef = await db.collection('external-prompts').add({
+      uid: userId,
+      planningId: planningId || null,
+      tool: profile.tool,
+      toolProfileVersion: profile.verificationDate,
+      resourceType: String(resourceType || 'presentación'),
+      package: buildExternalPromptPackage(null, planning, profile, resourceType, raw),
+      aiContributions: [{ model: aiResult.model, provider: aiResult.provider, generatedAt: now }],
+      createdAt: now,
+    });
+
+    await db.collection('audit-logs').add({
+      userId, action: 'prompt_generate', resource: 'external_prompt', resourceId: docRef.id,
+      tool: profile.tool, resourceType, createdAt: now,
+    });
+    await db.collection('ai-costs').add({
+      userId, date: now.split('T')[0], provider: aiResult.provider, model: aiResult.model,
+      inputTokens: aiResult.inputTokens, outputTokens: aiResult.outputTokens, cost: aiResult.cost,
+      action: 'prompt_generate', result: 'success', tool: profile.tool,
+    });
+    await recordBudgetUsage(aiResult.cost);
+
+    return { promptId: docRef.id, ...prompt.data, package: raw };
+  }
+);
+
+// U11: exporta un paquete generado a texto / markdown / JSON.
+export const exportExternalPrompt = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const userId = request.auth.uid;
+    const { promptId, format } = request.data || {};
+    if (!promptId || !isValidExternalPromptFormat(format)) throw new Error('FORMATO_INVALIDO');
+
+    const promptSnap = await db.collection('external-prompts').doc(promptId).get();
+    if (!promptSnap.exists) throw new Error('PROMPT_NO_ENCONTRADO');
+    const doc = promptSnap.data();
+    if (doc.uid !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const pkg = doc.package || {};
+    const content = exportExternalPromptPackage(pkg, format);
+    const now = new Date().toISOString();
+    await db.collection('audit-logs').add({
+      userId, action: 'prompt_export', resource: 'external_prompt', resourceId: promptId,
+      format, createdAt: now,
+    });
+
+    return { promptId, format, content };
   }
 );
 

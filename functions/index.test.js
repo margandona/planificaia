@@ -111,7 +111,16 @@ import {
   isMissionAccessible,
   buildEvidenceRecord,
   applyEvidenceApproval,
-  buildTeacherFeedback
+  buildTeacherFeedback,
+  buildExperienceSharePayload,
+  canPublishExperience,
+  calculateExperienceProgress,
+  resolveExternalToolProfile,
+  buildExternalToolPrompt,
+  validateExternalToolPrompt,
+  buildExternalPromptPackage,
+  exportExternalPromptPackage,
+  isValidExternalPromptFormat
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1570,5 +1579,125 @@ describe('U9 - Evidencias, revisión docente y retroalimentación', () => {
     expect(fb.type).toBe('teacher');
     expect(fb.text).not.toMatch(/<b>/);
     expect(fb.missionId).toBe('m2');
+  });
+});
+
+describe('U10 - Publicación y analítica básica', () => {
+  const validExperience = {
+    status: 'draft',
+    title: 'Misión lunar',
+    description: 'Descripción de la experiencia.',
+    purpose: 'Propósito pedagógico',
+    evidenceCriteria: ['Criterio A'],
+    missions: [{ id: 'm1', title: 'Despegue', instructions: 'Instrucciones', points: 10, order: 1, unlockConditions: [] }],
+    rules: [],
+    skills: [],
+    mode: 'individual',
+  };
+
+  test('construye payload de compartición con código, shortCode y URL pública', () => {
+    const exp = { code: 'ABC123DE', shortCode: 'XYZ789' };
+    const share = buildExperienceSharePayload('exp-1', exp);
+    expect(share.code).toBe('ABC123DE');
+    expect(share.shortCode).toBe('XYZ789');
+    expect(share.url).toContain('/#/participar/ABC123DE');
+    expect(share.qrUrl).toBe(share.url);
+  });
+
+  test('genera shortCode si no existe', () => {
+    const share = buildExperienceSharePayload('exp-1', { code: 'ABC123DE' });
+    expect(share.shortCode).toMatch(/^[A-Z0-9]{6}$/);
+  });
+
+  test('solo publica experiencias sin críticos (VALIDACION_PENDIENTE si no)', () => {
+    expect(canPublishExperience(validExperience).ok).toBe(true);
+    expect(canPublishExperience({ ...validExperience, title: 'X' }).reason).toBe('VALIDACION_PENDIENTE');
+    expect(canPublishExperience({ ...validExperience, status: 'archived' }).reason).toBe('EXPERIENCIA_ARCHIVADA');
+    expect(canPublishExperience(null).reason).toBe('EXPERIENCIA_NO_ENCONTRADA');
+  });
+
+  test('calcula agregados de progreso sin ranking público', () => {
+    const participants = [
+      { status: 'active', progress: { points: 50, pctComplete: 50, missionsCompleted: ['m1'] } },
+      { status: 'active', progress: { points: 100, pctComplete: 100, missionsCompleted: ['m1', 'm2'] } },
+      { status: 'paused', progress: { points: 900, pctComplete: 90, missionsCompleted: ['m1'] } },
+    ];
+    const missions = [{ id: 'm1', title: 'Despegue' }, { id: 'm2', title: 'Órbita' }];
+    const progress = calculateExperienceProgress(participants, missions);
+    expect(progress.totalParticipants).toBe(3);
+    expect(progress.activeParticipants).toBe(2);
+    expect(progress.totalPoints).toBe(150);
+    expect(progress.averagePoints).toBe(75);
+    expect(progress.averagePctComplete).toBe(75);
+    expect(progress.totalMissionsCompleted).toBe(3);
+    expect(progress.missionsCompletedUnique).toBe(2);
+    expect(progress.perMission.find(m => m.missionId === 'm1').completedCount).toBe(2);
+    expect(progress.perMission.find(m => m.missionId === 'm2').completedCount).toBe(1);
+  });
+});
+
+describe('U11 - Generador de prompts externos', () => {
+  const planning = {
+    title: 'El sistema solar',
+    level: '4° básico',
+    subject: 'Ciencias Naturales',
+    purpose: 'Comprender el sistema solar.',
+    students: '32 estudiantes',
+    duration: '90',
+    modality: 'presencial',
+    learningObjectives: [{ code: 'OA1', text: 'Describir el sistema solar.' }],
+    resources: ['Globo terráqueo'],
+  };
+
+  test('resuelve perfiles activos y rechaza herramientas no verificadas', () => {
+    expect(resolveExternalToolProfile('genially').tool).toBe('genially');
+    expect(resolveExternalToolProfile('CANVA').name).toBe('Canva');
+    expect(resolveExternalToolProfile('gamma')).toBeNull();
+    expect(resolveExternalToolProfile('inexistente')).toBeNull();
+    expect(resolveExternalToolProfile('generic').active).toBe(true);
+  });
+
+  test('construye prompt específico por herramienta con la estructura 23.1', () => {
+    const profile = resolveExternalToolProfile('canva');
+    const { system, user, data } = buildExternalToolPrompt(planning, profile, 'infografía', {});
+    expect(system).toContain('Protección del sistema');
+    expect(user).toContain('Canva');
+    expect(data.herramientaDestino).toBe('canva');
+    expect(data.tipoRecurso).toBe('infografía');
+    expect(data.oa[0]).toContain('OA1');
+    expect(data.idioma).toBe('es-CL');
+    expect(data.accesibilidad.length).toBeGreaterThan(0);
+  });
+
+  test('valida la salida de la IA contra el schema', () => {
+    expect(validateExternalToolPrompt({ prompt: 'Haz una infografía sobre...', checklist: ['Revisar texto'] })).toHaveLength(0);
+    expect(validateExternalToolPrompt({ prompt: 'x' })).toContain('Falta prompt válido');
+    expect(validateExternalToolPrompt({ prompt: 'Prompt válido y largo suficiente', checklist: [] })).toContain('Falta checklist');
+    expect(validateExternalToolPrompt(null)).toEqual(['SALIDA_NO_JSON']);
+  });
+
+  test('construye paquete exportable y exporta en texto/markdown/json', () => {
+    const profile = resolveExternalToolProfile('genially');
+    const pkg = buildExternalPromptPackage('p1', planning, profile, 'quiz', {
+      prompt: 'Crea un quiz interactivo sobre el sistema solar.',
+      checklist: ['Añadir retroalimentación a cada pregunta'],
+    });
+    expect(pkg.tool).toBe('genially');
+    expect(pkg.prompt).toContain('sistema solar');
+
+    const text = exportExternalPromptPackage(pkg, 'text');
+    expect(text).toContain('## Prompt principal');
+    expect(text).toContain('Genially');
+    expect(text).toContain('BORRADOR');
+
+    const markdown = exportExternalPromptPackage(pkg, 'markdown');
+    expect(markdown).toContain('# Prompt para Genially');
+
+    const json = JSON.parse(exportExternalPromptPackage(pkg, 'json'));
+    expect(json.promptId).toBe('p1');
+
+    expect(exportExternalPromptPackage(pkg, 'pdf')).toBeNull();
+    expect(isValidExternalPromptFormat('json')).toBe(true);
+    expect(isValidExternalPromptFormat('docx')).toBe(false);
   });
 });

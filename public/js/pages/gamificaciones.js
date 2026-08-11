@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, reviewMissionEvidenceFn } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn } from '../core.js';
 
 // U7: editor de experiencias gamificadas (constructor nativo, gated por flag).
 const GamificacionesPage = defineComponent({
@@ -26,6 +26,12 @@ const GamificacionesPage = defineComponent({
     const reviewBusy = reactive({});
     const reviewOk = reactive({});
     const reviewErr = reactive({});
+
+    const pubBusy = reactive({});
+    const pubErr = reactive({});
+    const pubOk = reactive({});
+    const progressByExp = reactive({});
+    const progressBusy = reactive({});
 
     const loadEvidence = async (exp) => {
       const list = [];
@@ -59,6 +65,37 @@ const GamificacionesPage = defineComponent({
       } finally {
         reviewBusy[evKey(exp.id, ev.participantToken, ev.evidenceId, ev.status)] = false;
       }
+    };
+
+    const transition = async (exp, fn, okMsg) => {
+      pubBusy[exp.id] = true; pubErr[exp.id] = ''; pubOk[exp.id] = '';
+      try {
+        const res = await fn({ experienceId: exp.id });
+        pubOk[exp.id] = `${okMsg} (${res.data && res.data.status || ''})`;
+        await loadExperiences();
+      } catch (e) {
+        const m = {
+          VALIDACION_PENDIENTE: 'No se puede publicar: revisa los criterios críticos (título, descripción, propósito, misiones).',
+          EXPERIENCIA_ARCHIVADA: 'Experiencia archivada.',
+          EXPERIENCIA_NO_ENCONTRADA: 'Experiencia no encontrada.',
+          FLAG_DESACTIVADO: 'El módulo de gamificación está desactivado.',
+        }[e.message] || mapError(e) || 'No se pudo aplicar el cambio de estado.';
+        pubErr[exp.id] = m;
+      } finally { pubBusy[exp.id] = false; }
+    };
+
+    const doPublish = (exp) => transition(exp, publishGamifiedExperienceFn, 'Experiencia publicada');
+    const doUnpublish = (exp) => transition(exp, unpublishGamifiedExperienceFn, 'Experiencia despublicada');
+    const doArchive = (exp) => transition(exp, archiveGamifiedExperienceFn, 'Experiencia archivada');
+
+    const loadProgress = async (exp) => {
+      progressBusy[exp.id] = true; pubErr[exp.id] = '';
+      try {
+        const res = await computeExperienceProgressFn({ experienceId: exp.id });
+        progressByExp[exp.id] = res.data;
+      } catch (e) {
+        pubErr[exp.id] = mapError(e) || 'No se pudo calcular el progreso.';
+      } finally { progressBusy[exp.id] = false; }
     };
 
     const statusBadge = (status) => {
@@ -207,6 +244,24 @@ const GamificacionesPage = defineComponent({
               h('span', { class: 'text-xs font-medium text-slate-500' }, 'Acceso participantes'),
               h('code', { class: 'bg-slate-100 px-2 py-0.5 rounded text-xs font-bold tracking-widest' }, exp.code),
               h('a', { href: `#/participar/${exp.code}`, class: 'text-xs text-violet-600 hover:underline' }, 'Enlace del portal'),
+            ]),
+          ]) : null,
+
+          h('div', { class: 'px-4 pb-3 flex flex-wrap gap-2' }, [
+            exp.status === 'draft' ? h('button', { class: 'text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50', disabled: !!pubBusy[exp.id], onClick: () => doPublish(exp) }, pubBusy[exp.id] ? 'Publicando...' : 'Publicar') : null,
+            exp.status === 'published' ? h('button', { class: 'text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 transition disabled:opacity-50', disabled: !!pubBusy[exp.id], onClick: () => doUnpublish(exp) }, 'Despublicar') : null,
+            ['draft', 'published', 'paused'].includes(exp.status) ? h('button', { class: 'text-xs bg-slate-600 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 transition disabled:opacity-50', disabled: !!pubBusy[exp.id], onClick: () => doArchive(exp) }, 'Archivar') : null,
+            h('button', { class: 'text-xs text-violet-600 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition disabled:opacity-50', disabled: !!progressBusy[exp.id], onClick: () => loadProgress(exp) }, progressBusy[exp.id] ? 'Calculando...' : 'Ver progreso'),
+          ]),
+          pubErr[exp.id] ? h('p', { class: 'px-4 pb-2 text-xs text-red-600' }, pubErr[exp.id]) : null,
+          pubOk[exp.id] ? h('p', { class: 'px-4 pb-2 text-xs text-green-600' }, pubOk[exp.id]) : null,
+          progressByExp[exp.id] ? h('div', { class: 'mx-4 mb-3 rounded-lg bg-slate-50 p-3' }, [
+            h('p', { class: 'text-xs font-medium text-slate-500 mb-2' }, 'Progreso del grupo'),
+            h('div', { class: 'grid grid-cols-2 gap-2 text-xs' }, [
+              h('div', [ h('p', { class: 'text-slate-400' }, 'Participantes activos'), h('p', { class: 'font-semibold text-slate-800' }, `${progressByExp[exp.id].activeParticipants} / ${progressByExp[exp.id].totalParticipants}`) ]),
+              h('div', [ h('p', { class: 'text-slate-400' }, 'Avance promedio'), h('p', { class: 'font-semibold text-slate-800' }, `${progressByExp[exp.id].averagePctComplete}%`) ]),
+              h('div', [ h('p', { class: 'text-slate-400' }, 'Puntos totales'), h('p', { class: 'font-semibold text-slate-800' }, String(progressByExp[exp.id].totalPoints)) ]),
+              h('div', [ h('p', { class: 'text-slate-400' }, 'Misiones completadas'), h('p', { class: 'font-semibold text-slate-800' }, String(progressByExp[exp.id].totalMissionsCompleted)) ]),
             ]),
           ]) : null,
 

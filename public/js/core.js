@@ -154,6 +154,12 @@ const regenerateGamificationSectionFn = httpsCallable(fx, 'regenerateGamificatio
 const joinGamifiedExperienceFn = httpsCallable(fx, 'joinGamifiedExperience');
 const submitMissionEvidenceFn = httpsCallable(fx, 'submitMissionEvidence');
 const reviewMissionEvidenceFn = httpsCallable(fx, 'reviewMissionEvidence');
+const publishGamifiedExperienceFn = httpsCallable(fx, 'publishGamifiedExperience');
+const unpublishGamifiedExperienceFn = httpsCallable(fx, 'unpublishGamifiedExperience');
+const archiveGamifiedExperienceFn = httpsCallable(fx, 'archiveGamifiedExperience');
+const computeExperienceProgressFn = httpsCallable(fx, 'computeExperienceProgress');
+const generateExternalToolPromptFn = httpsCallable(fx, 'generateExternalToolPrompt');
+const exportExternalPromptFn = httpsCallable(fx, 'exportExternalPrompt');
 
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
@@ -317,6 +323,7 @@ const Layout = defineComponent({
             !store.user.emailVerified ? h('span', { class: 'inline-block w-2 h-2 bg-amber-400 rounded-full', title: 'Correo no verificado' }) : null,
             h('a', { href: '#/dashboard', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Dashboard'),
             h('a', { href: '#/gamificaciones', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Gamificaciones'),
+            h('a', { href: '#/prompts-externos', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Prompts externos'),
             (store.org || isAdmin()) ? h('a', { href: '#/institucional', class: 'text-sm text-slate-600 hover:text-slate-900' }, 'Institucional') : null,
             h('a', { href: '#/perfil', class: 'text-sm text-slate-600 hover:text-slate-900' }, store.user.displayName || store.user.email),
             h('button', { type: 'button', onClick: logout, class: 'text-sm text-red-600 hover:text-red-700' }, 'Salir'),
@@ -342,4 +349,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn };

@@ -182,6 +182,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ========== Perfiles de herramientas externas U11: público/admin ==========
+    match /external-tool-profiles/{tool} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ========== Prompts externos generados (U11): propietario ==========
+    match /external-prompts/{promptId} {
+      allow read: if isOwner(resource.data.uid);
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isOwner(resource.data.uid);
+    }
+
     // ========== Feature flags (U3): lectura pública (wizard/cache 5 min), escritura admin ==========
     match /config/feature-flags {
       allow read: if true;
