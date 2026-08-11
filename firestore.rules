@@ -254,6 +254,12 @@ service cloud.firestore {
       allow write: if false; // solo desde Cloud Functions (submitFeedback)
     }
 
+    // ========== Rate limit U13: solo Cloud Functions (conteo atómico) ==========
+    match /rate-limit/{key} {
+      allow read: if isAdmin();
+      allow write: if false; // solo desde Cloud Functions (enforceRateLimit)
+    }
+
     // ========== Denegar todo lo demás ==========
     match /{document=**} {
       allow read, write: if false;

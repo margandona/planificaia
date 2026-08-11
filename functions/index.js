@@ -98,7 +98,10 @@ import {
   exportExternalPromptPackage,
   isValidExternalPromptFormat,
   diffGamificationSource,
-  applySelectiveSync
+  applySelectiveSync,
+  buildRateLimitDecision,
+  evaluateRateLimit,
+  SUBCOLLECTION_RETENTION_POLICY
 } from './logic.js';
 
 export {
@@ -200,6 +203,30 @@ async function releaseDailyAllowance(ref) {
     const prev = snap.data().count || 1;
     t.set(ref, { count: Math.max(0, prev - 1) }, { merge: true });
   });
+}
+
+// U13: rate limit propio por uid/scope (SEC-02). Conteo atómico sobre
+// `rate-limit/{key}` con ventana diaria; sin doble tope con PLANS.
+const RATE_LIMIT_COLLECTION = 'rate-limit';
+
+async function enforceRateLimit(scope, action, now = new Date()) {
+  const decision = buildRateLimitDecision(scope, action, now);
+  let allowed = false;
+  await db.runTransaction(async (t) => {
+    const ref = db.collection(RATE_LIMIT_COLLECTION).doc(decision.key);
+    const snap = await t.get(ref);
+    const counter = snap.exists ? (snap.data().count || 0) : 0;
+    const check = evaluateRateLimit(counter, decision.limit);
+    allowed = check.allowed;
+    if (allowed) {
+      t.set(ref, {
+        scope: String(scope), action, day: decision.day,
+        count: counter + 1, updatedAt: now.toISOString(),
+      }, { merge: true });
+    }
+  });
+  if (!allowed) throw new Error('RATE_LIMIT_EXCEDIDO');
+  return decision;
 }
 
 
@@ -1240,6 +1267,7 @@ export const joinGamifiedExperience = onCall(
     if (!isValidExperienceCode(normalizedCode)) throw new Error('CODIGO_INVALIDO');
     const normalizedAlias = normalizeParticipantAlias(alias);
     if (normalizedAlias.length < 2) throw new Error('ALIAS_OCUPADO');
+    await enforceRateLimit(`join:${normalizedCode}`, 'gamify_join');
 
     const pubSnap = await db.collection('gamified-experiences')
       .where('code', '==', normalizedCode)
@@ -1296,6 +1324,7 @@ export const submitMissionEvidence = onCall(
     const { participantToken, missionId, text, links, fileUrl, fileSize, expId } = request.data || {};
     if (!participantToken || !missionId) throw new Error('DATOS_INCOMPLETOS');
     if (!expId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    await enforceRateLimit(`ev:${participantToken}`, 'gamify_evidence_submit');
 
     const participantDocRef = db.collection('gamified-experiences').doc(expId).collection('participants').doc(participantToken);
     const participantSnap = await participantDocRef.get();
@@ -1339,6 +1368,7 @@ export const reviewMissionEvidence = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const { expId, evidenceId, approve, comment } = request.data || {};
     if (!expId || !evidenceId || typeof approve !== 'boolean') throw new Error('DATOS_INCOMPLETOS');
+    await enforceRateLimit(`rev:${request.auth.uid}`, 'gamify_evidence_review');
 
     const expSnap = await db.collection('gamified-experiences').doc(expId).get();
     if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
@@ -1516,6 +1546,36 @@ export const computeExperienceProgress = onCall(
   }
 );
 
+// U13: otorga una insignia de forma idempotente (SEC-03). Función interna, no
+// expuesta como callable: la invocan el motor de reglas/eventos tras validar la
+// condición. La unicidad la garantiza el doc con id = uniqueKey dentro de una
+// transacción (BADGE_DUPLICADO si ya existe). Auditoría gamify_badge; costo 0 IA.
+export async function awardInternalBadge(experienceId, participantToken, badgeCode, sourceEvent = {}) {
+  if (!experienceId || !participantToken || !badgeCode) throw new Error('DATOS_INCOMPLETOS');
+  const uniqueKey = `${experienceId}::${participantToken}::${badgeCode}`;
+  const now = new Date().toISOString();
+  const award = {
+    experienceId, participantToken, badgeCode, uniqueKey,
+    earnedAt: now, sourceEvent: sourceEvent.type || 'unknown',
+  };
+
+  await db.runTransaction(async (t) => {
+    const ref = db.collection('badge-awards').doc(uniqueKey);
+    const snap = await t.get(ref);
+    if (snap.exists) throw new Error('BADGE_DUPLICADO');
+    t.set(ref, award);
+  });
+
+  await db.collection('gamification-audit-logs').add({
+    expId: experienceId, participantToken, action: 'gamify_badge', badgeCode, createdAt: now,
+  });
+  await db.collection('audit-logs').add({
+    userId: 'participante', action: 'gamify_badge', resource: 'gamified_experience', resourceId: experienceId,
+    badgeCode, createdAt: now,
+  });
+  return { awardId: uniqueKey };
+}
+
 // U11: genera un prompt específico para una herramienta externa verificada.
 export const generateExternalToolPrompt = onCall(
   { cors: ['https://planificacion-con-ia.web.app'] },
@@ -1610,10 +1670,11 @@ export const syncPlanningContext = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     await runRetentionSweep();
     const userId = request.auth.uid;
-    const { experienceId, fields } = request.data || {};
+    const { experienceId } = request.data || {};
     const flags = await getFeatureFlags();
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    await enforceRateLimit(`pub:${userId}`, 'gamify_publish');
 
     const expRef = db.collection('gamified-experiences').doc(experienceId);
     const expSnap = await expRef.get();
@@ -2418,13 +2479,29 @@ export async function runRetentionSweep(cap = RETENTION_SWEEP_CAP) {
   const report = {};
   for (const [name, policy] of Object.entries(RETENTION_POLICY)) {
     const cutoff = retentionCutoffIso(policy.days);
-    const snap = await db.collection(name).where('createdAt', '<', cutoff).limit(cap).get();
+    const snap = await db.collection(name).where(policy.field || 'createdAt', '<', cutoff).limit(cap).get();
     if (!snap.empty) {
       const batch = db.batch();
       snap.forEach((d) => batch.delete(d.ref));
       await batch.commit();
     }
     report[name] = snap.size;
+  }
+  // U13: purga de subcolecciones de experiencias (participants/evidence/feedback)
+  // vía collectionGroup. Se ignora la falla de índice (CI no despliega índices).
+  for (const [name, policy] of Object.entries(SUBCOLLECTION_RETENTION_POLICY)) {
+    try {
+      const cutoff = retentionCutoffIso(policy.days);
+      const snap = await db.collectionGroup(name).where(policy.field || 'createdAt', '<', cutoff).limit(cap).get();
+      if (!snap.empty) {
+        const batch = db.batch();
+        snap.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      report[`${name}*`] = snap.size;
+    } catch (error) {
+      report[`${name}*`] = `skip:${error.message.slice(0, 40)}`;
+    }
   }
   return report;
 }

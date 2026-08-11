@@ -122,7 +122,12 @@ import {
   exportExternalPromptPackage,
   isValidExternalPromptFormat,
   diffGamificationSource,
-  applySelectiveSync
+  applySelectiveSync,
+  SUBCOLLECTION_RETENTION_POLICY,
+  GAMIFICATION_RATE_LIMITS,
+  rateLimitKey,
+  evaluateRateLimit,
+  buildRateLimitDecision
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1756,5 +1761,43 @@ describe('U12 - Integración con planificación', () => {
     const { update, applied } = applySelectiveSync(experience, diff.selectiveContext, ['narrative', 'title']);
     expect(applied).toHaveLength(0);
     expect(update).toEqual({});
+  });
+});
+
+describe('U13 - Seguridad, privacidad y costos', () => {
+  test('badge-awards y external-prompts tienen retención de 1 año con campo earnedAt', () => {
+    expect(RETENTION_POLICY['badge-awards'].days).toBe(365);
+    expect(RETENTION_POLICY['badge-awards'].field).toBe('earnedAt');
+    expect(RETENTION_POLICY['external-prompts'].days).toBe(365);
+  });
+
+  test('SUBCOLLECTION_RETENTION_POLICY cubre participants/evidence/feedback sin tocar la raíz', () => {
+    expect(SUBCOLLECTION_RETENTION_POLICY['participants'].days).toBe(30);
+    expect(SUBCOLLECTION_RETENTION_POLICY['participants'].field).toBe('joinedAt');
+    expect(SUBCOLLECTION_RETENTION_POLICY['evidence'].days).toBe(90);
+    expect(SUBCOLLECTION_RETENTION_POLICY['feedback'].days).toBe(90);
+    expect(Object.keys(SUBCOLLECTION_RETENTION_POLICY)).not.toContain('gamified-experiences');
+  });
+
+  test('rateLimitKey construye bucket diario estable por scope/acción', () => {
+    const k = rateLimitKey('ev:tok123', 'gamify_evidence_submit', '2026-08-11');
+    expect(k).toBe('ev:tok123__gamify_evidence_submit__2026-08-11');
+  });
+
+  test('evaluateRateLimit respeta el máximo y cuenta el remanente', () => {
+    expect(evaluateRateLimit(0, 100)).toEqual({ allowed: true, remaining: 100 });
+    expect(evaluateRateLimit(99, 100)).toEqual({ allowed: true, remaining: 1 });
+    expect(evaluateRateLimit(100, 100)).toEqual({ allowed: false, remaining: 0 });
+    expect(evaluateRateLimit(null, 100)).toEqual({ allowed: true, remaining: 100 });
+  });
+
+  test('buildRateLimitDecision define el límite por acción y la ventana diaria', () => {
+    const d = buildRateLimitDecision('pub:uid1', 'gamify_publish', new Date('2026-08-11T10:00:00Z'));
+    expect(d.key).toBe('pub:uid1__gamify_publish__2026-08-11');
+    expect(d.day).toBe('2026-08-11');
+    expect(d.limit).toBe(60);
+    expect(GAMIFICATION_RATE_LIMITS['gamify_join'].max).toBe(100);
+    expect(GAMIFICATION_RATE_LIMITS['gamify_evidence_submit'].max).toBe(200);
+    expect(GAMIFICATION_RATE_LIMITS['gamify_evidence_review'].max).toBe(200);
   });
 });

@@ -1159,6 +1159,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U13 — Seguridad, privacidad y costos
 - Reglas Firestore, rate limit propio, retención ampliada, `gamification-costs`, App Check (recomendado).
 
+**Cierre (2026-08-11):** seguridad/privacidad/costos implementados. Rate limit propio por uid/scope (SEC-02, sección 39): `GAMIFICATION_RATE_LIMITS` (gamify_join 100/día, evidencia 200/día, revisión 200/día, publicación 60/día) y evaluadores puros en `logic.js` (`rateLimitKey`, `evaluateRateLimit`, `buildRateLimitDecision`); helper atómico `enforceRateLimit` en `index.js` sobre `rate-limit/{key}` con ventana diaria, aplicado en `joinGamifiedExperience`, `submitMissionEvidence`, `reviewMissionEvidence` y `publishGamifiedExperience` (sin doble tope con PLANS; error `RATE_LIMIT_EXCEDIDO`). Retención ampliada (sección 40): `SUBCOLLECTION_RETENTION_POLICY` en `logic.js` (`participants` 30 días `joinedAt`, `evidence`/`feedback` 90 días `createdAt`) y `runRetentionSweep` extendido para barrerlas por `collectionGroup` (ignora falla de índice en CI); `badge-awards` añadido a `RETENTION_POLICY` (1 año, `field:'earnedAt'`). `awardInternalBadge` (SEC-03): función interna idempotente con doc id = `uniqueKey` transaccional (`BADGE_DUPLICADO`), auditoría `gamify_badge`, costo 0 IA, lista para el motor de reglas. Regla Firestore explícita `rate-limit` (solo Functions). App Check (recomendado): pendiente de habilitar en consola (D4). 5 tests nuevos (182/182).
+
 ### Fase U14 — Accesibilidad
 - Auditoría axe-core ampliada + manual en portal participante.
 

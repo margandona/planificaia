@@ -2168,6 +2168,16 @@ export const RETENTION_POLICY = {
   'gamified-experiences': { days: 730, desc: 'Experiencias gamificadas: 2 años' },
   'gamification-costs': { days: 730, desc: 'Costos de gamificación: 2 años' },
   'gamification-audit-logs': { days: 365, desc: 'Auditoría de gamificación: 1 año' },
+  'external-prompts': { days: 365, desc: 'Prompts externos: 1 año' },
+  'badge-awards': { days: 365, desc: 'Insignias otorgadas: 1 año', field: 'earnedAt' },
+};
+
+// U13: retención de subcolecciones de experiencias (sección 40) — la purga se
+// hace con collectionGroup sobre cada subcolección (sin tocar el documento raíz).
+export const SUBCOLLECTION_RETENTION_POLICY = {
+  participants: { days: 30, desc: 'Participantes: 30 días tras cierre', field: 'joinedAt' },
+  evidence: { days: 90, desc: 'Evidencias: 90 días', field: 'createdAt' },
+  feedback: { days: 90, desc: 'Retroalimentación: 90 días', field: 'createdAt' },
 };
 
 export function retentionCutoffIso(days, now = new Date()) {
@@ -2626,4 +2636,34 @@ export function applySelectiveSync(experience = {}, selectiveContext = {}, field
   if (applied.includes('purpose')) update.purpose = sanitizeInput(String(selectiveContext.purpose || ''));
   if (applied.includes('evidenceCriteria')) update.evidenceCriteria = Array.isArray(selectiveContext.evidenceCriteria) ? selectiveContext.evidenceCriteria : [];
   return { update, applied };
+}
+
+// ===== U13: Seguridad, privacidad y costos =====
+// Rate limit propio por uid (SEC-02, sección 39): Firestore no ofrece rate limit
+// nativo en callables (verificado 2026-08-06), así que el conteo es atómico sobre
+// `rate-limit/{key}` con ventana deslizante por día. Función pura testeable.
+export const RATE_LIMIT_WINDOW_DAYS = 1;
+export const GAMIFICATION_RATE_LIMITS = {
+  'gamify_join': { max: 100, desc: 'Uniones por código: 100/día' },
+  'gamify_evidence_submit': { max: 200, desc: 'Entregas de evidencia: 200/día' },
+  'gamify_evidence_review': { max: 200, desc: 'Revisiones docentes: 200/día' },
+  'gamify_publish': { max: 60, desc: 'Publicaciones: 60/día' },
+};
+
+export function rateLimitKey(scope, action, day) {
+  return `${String(scope || '')}__${String(action || '')}__${String(day || '')}`;
+}
+
+// Evalúa un contador de rate limit contra un máximo. Devuelve {allowed, remaining}.
+export function evaluateRateLimit(counter = 0, max = 0) {
+  const used = Number(counter) || 0;
+  return { allowed: used < max, remaining: Math.max(0, max - used) };
+}
+
+// Determina si un intento supera el límite y, si procede, el bucket atómico a
+// actualizar (identidad estable de la ventana diaria).
+export function buildRateLimitDecision(scope, action, now = new Date()) {
+  const day = now.toISOString().split('T')[0];
+  const limit = (GAMIFICATION_RATE_LIMITS[action] || {}).max || 100;
+  return { key: rateLimitKey(scope, action, day), day, limit };
 }
