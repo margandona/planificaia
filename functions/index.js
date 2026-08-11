@@ -96,7 +96,9 @@ import {
   validateExternalToolPrompt,
   buildExternalPromptPackage,
   exportExternalPromptPackage,
-  isValidExternalPromptFormat
+  isValidExternalPromptFormat,
+  diffGamificationSource,
+  applySelectiveSync
 } from './logic.js';
 
 export {
@@ -1597,6 +1599,63 @@ export const exportExternalPrompt = onCall(
     });
 
     return { promptId, format, content };
+  }
+);
+
+// U12: compara la experiencia con la versión actual de la planificación fuente
+// y aplica sincronización SOLO de los campos que el docente autorice (nunca overwrite).
+export const syncPlanningContext = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    await runRetentionSweep();
+    const userId = request.auth.uid;
+    const { experienceId, fields } = request.data || {};
+    const flags = await getFeatureFlags();
+    if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
+    if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const expRef = db.collection('gamified-experiences').doc(experienceId);
+    const expSnap = await expRef.get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    if (experience.authorUid !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+    if (!experience.sourcePlanningId) throw new Error('SIN_FUENTE');
+
+    const planningSnap = await db.collection('plannings').doc(experience.sourcePlanningId).get();
+    if (!planningSnap.exists) throw new Error('FUENTE_NO_ENCONTRADA');
+    const planning = planningSnap.data();
+    if (planning.userId !== userId) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const diff = diffGamificationSource(experience, planning);
+    const now = new Date().toISOString();
+    const result = { ...diff };
+    result.applied = [];
+
+    // Sync selectivo: solo si el docente pide campos y hay versión más reciente.
+    if (fields && diff.outdated) {
+      const { update, applied } = applySelectiveSync(experience, diff.selectiveContext, fields);
+      result.applied = applied;
+      if (applied.length > 0) {
+        await expRef.update({
+          ...update,
+          sourcePlanningVersionId: planning.version != null ? String(planning.version) : experience.sourcePlanningVersionId,
+          version: (experience.version || 0) + 1,
+          updatedAt: now,
+        });
+      }
+    }
+
+    await db.collection('gamification-audit-logs').add({
+      expId: experienceId, action: 'gamify_sync', data: { applied: result.applied, changeCount: diff.changeCount },
+      createdAt: now, uid: userId,
+    });
+    await db.collection('audit-logs').add({
+      userId, action: 'gamify_sync', resource: 'gamified_experience', resourceId: experienceId,
+      applied: result.applied, changeCount: diff.changeCount, createdAt: now,
+    });
+
+    return result;
   }
 );
 

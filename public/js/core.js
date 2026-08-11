@@ -160,6 +160,7 @@ const archiveGamifiedExperienceFn = httpsCallable(fx, 'archiveGamifiedExperience
 const computeExperienceProgressFn = httpsCallable(fx, 'computeExperienceProgress');
 const generateExternalToolPromptFn = httpsCallable(fx, 'generateExternalToolPrompt');
 const exportExternalPromptFn = httpsCallable(fx, 'exportExternalPrompt');
+const syncPlanningContextFn = httpsCallable(fx, 'syncPlanningContext');
 
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
@@ -349,4 +350,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn, syncPlanningContextFn };

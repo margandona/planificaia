@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, syncPlanningContextFn } from '../core.js';
 
 // U7: editor de experiencias gamificadas (constructor nativo, gated por flag).
 const GamificacionesPage = defineComponent({
@@ -32,6 +32,9 @@ const GamificacionesPage = defineComponent({
     const pubOk = reactive({});
     const progressByExp = reactive({});
     const progressBusy = reactive({});
+    const syncBusy = reactive({});
+    const syncErr = reactive({});
+    const syncData = reactive({});
 
     const loadEvidence = async (exp) => {
       const list = [];
@@ -96,6 +99,34 @@ const GamificacionesPage = defineComponent({
       } catch (e) {
         pubErr[exp.id] = mapError(e) || 'No se pudo calcular el progreso.';
       } finally { progressBusy[exp.id] = false; }
+    };
+
+    const doSync = async (exp) => {
+      syncBusy[exp.id] = true; syncErr[exp.id] = ''; syncData[exp.id] = null;
+      try {
+        const res = await syncPlanningContextFn({ experienceId: exp.id });
+        syncData[exp.id] = res.data;
+        if (res.data.applied && res.data.applied.length) await loadExperiences();
+      } catch (e) {
+        const m = {
+          SIN_FUENTE: 'Esta experiencia no tiene planificación fuente vinculada.',
+          FUENTE_NO_ENCONTRADA: 'La planificación fuente ya no existe.',
+          ACCESO_NO_AUTORIZADO: 'Solo el autor puede sincronizar.',
+        }[e.message] || mapError(e) || 'No se pudo sincronizar.';
+        syncErr[exp.id] = m;
+      } finally { syncBusy[exp.id] = false; }
+    };
+
+    const doSyncWith = async (exp, fields) => {
+      syncBusy[exp.id] = true; syncErr[exp.id] = '';
+      try {
+        const res = await syncPlanningContextFn({ experienceId: exp.id, fields });
+        syncData[exp.id] = res.data;
+        await loadExperiences();
+      } catch (e) {
+        const m = mapError(e) || 'No se pudieron aplicar los cambios.';
+        syncErr[exp.id] = m;
+      } finally { syncBusy[exp.id] = false; }
     };
 
     const statusBadge = (status) => {
@@ -252,7 +283,22 @@ const GamificacionesPage = defineComponent({
             exp.status === 'published' ? h('button', { class: 'text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 transition disabled:opacity-50', disabled: !!pubBusy[exp.id], onClick: () => doUnpublish(exp) }, 'Despublicar') : null,
             ['draft', 'published', 'paused'].includes(exp.status) ? h('button', { class: 'text-xs bg-slate-600 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 transition disabled:opacity-50', disabled: !!pubBusy[exp.id], onClick: () => doArchive(exp) }, 'Archivar') : null,
             h('button', { class: 'text-xs text-violet-600 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition disabled:opacity-50', disabled: !!progressBusy[exp.id], onClick: () => loadProgress(exp) }, progressBusy[exp.id] ? 'Calculando...' : 'Ver progreso'),
+            h('button', { class: 'text-xs text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition disabled:opacity-50', disabled: !!syncBusy[exp.id], onClick: () => doSync(exp) }, syncBusy[exp.id] ? 'Sincronizando...' : 'Sincronizar fuente'),
           ]),
+          syncErr[exp.id] ? h('p', { class: 'px-4 pb-2 text-xs text-red-600' }, syncErr[exp.id]) : null,
+          syncData[exp.id] ? h('div', { class: 'mx-4 mb-3 rounded-lg bg-blue-50 p-3' }, [
+            h('p', { class: 'text-xs font-medium text-blue-700 mb-1' }, syncData[exp.id].outdated ? `La planificación fuente cambió (v${syncData[exp.id].currentVersion} vs v${syncData[exp.id].experienceVersion})` : 'La experiencia está al día con su planificación fuente'),
+            (syncData[exp.id].changes || []).length > 0 ? h('div', { class: 'space-y-1 mb-2' }, syncData[exp.id].changes.map(c =>
+              h('p', { class: 'text-xs text-blue-800' }, `• ${c.field}: ${c.kind}${c.items ? ' (' + c.items.join(', ') + ')' : ''}`)
+            )) : null,
+            (syncData[exp.id].suggestions || []).length > 0 ? h('div', { class: 'space-y-1 mb-2' }, syncData[exp.id].suggestions.map(s =>
+              h('p', { class: 'text-xs text-blue-700 italic' }, `→ ${s}`)
+            )) : null,
+            syncData[exp.id].outdated && (syncData[exp.id].applied || []).length === 0 ? h('div', { class: 'flex flex-wrap gap-2 mt-2' }, [
+              h('button', { class: 'text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition disabled:opacity-50', disabled: !!syncBusy[exp.id], onClick: () => doSyncWith(exp, ['oa', 'purpose', 'evidenceCriteria']) }, syncBusy[exp.id] ? 'Aplicando...' : 'Aplicar cambios seguros'),
+            ]) : null,
+            (syncData[exp.id].applied || []).length > 0 ? h('p', { class: 'text-xs text-green-700' }, `Campos aplicados: ${syncData[exp.id].applied.join(', ')}`) : null,
+          ]) : null,
           pubErr[exp.id] ? h('p', { class: 'px-4 pb-2 text-xs text-red-600' }, pubErr[exp.id]) : null,
           pubOk[exp.id] ? h('p', { class: 'px-4 pb-2 text-xs text-green-600' }, pubOk[exp.id]) : null,
           progressByExp[exp.id] ? h('div', { class: 'mx-4 mb-3 rounded-lg bg-slate-50 p-3' }, [

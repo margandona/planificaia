@@ -1154,6 +1154,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U12 — Integración con planificación
 - `syncPlanningContext`, versionado, advertencias de versión.
 
+**Cierre (2026-08-10):** integración con planificación implementada. `diffGamificationSource` puro en `logic.js` (compara `sourcePlanningVersionId` vs versión actual, diff de `oa`/`purpose`/`evidenceCriteria` + sugerencias, `selectiveContext` para sync seguro) y `applySelectiveSync` (`SYNCABLE_FIELDS`, solo aplica campos pedidos, nunca overwrite). Callable `syncPlanningContext` (flag, autor/owner, `SIN_FUENTE`/`FUENTE_NO_ENCONTRADA`, aplica campos autorizados y versiona la experiencia, auditoría `gamify_sync`). Frontend: botón "Sincronizar fuente" + panel de diff/sugerencias y "Aplicar cambios seguros" en `gamificaciones.js`; wrapper `syncPlanningContextFn` en `core.js`. 4 tests nuevos (177/177).
+
 ### Fase U13 — Seguridad, privacidad y costos
 - Reglas Firestore, rate limit propio, retención ampliada, `gamification-costs`, App Check (recomendado).
 

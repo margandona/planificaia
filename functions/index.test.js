@@ -120,7 +120,9 @@ import {
   validateExternalToolPrompt,
   buildExternalPromptPackage,
   exportExternalPromptPackage,
-  isValidExternalPromptFormat
+  isValidExternalPromptFormat,
+  diffGamificationSource,
+  applySelectiveSync
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1699,5 +1701,60 @@ describe('U11 - Generador de prompts externos', () => {
     expect(exportExternalPromptPackage(pkg, 'pdf')).toBeNull();
     expect(isValidExternalPromptFormat('json')).toBe(true);
     expect(isValidExternalPromptFormat('docx')).toBe(false);
+  });
+});
+
+describe('U12 - Integración con planificación', () => {
+  const planning = {
+    version: 'v2',
+    purpose: 'Propósito nuevo',
+    learningObjectives: [{ code: 'OA1', text: 'Uno' }, { code: 'OA2', text: 'Dos' }],
+    assessment: { criteria: ['Criterio nuevo'] },
+  };
+  const experience = {
+    sourcePlanningVersionId: 'v1',
+    purpose: 'Propósito anterior',
+    oa: [{ code: 'OA1', text: 'Uno' }],
+    evidenceCriteria: ['Criterio viejo'],
+  };
+
+  test('detecta versiones desactualizadas y genera diff + sugerencias', () => {
+    const diff = diffGamificationSource(experience, planning);
+    expect(diff.outdated).toBe(true);
+    expect(diff.currentVersion).toBe('v2');
+    expect(diff.experienceVersion).toBe('v1');
+    expect(diff.changes.some(c => c.field === 'version')).toBe(true);
+    expect(diff.changes.some(c => c.field === 'oa' && c.kind === 'added')).toBe(true);
+    expect(diff.changes.some(c => c.field === 'purpose')).toBe(true);
+    expect(diff.changes.some(c => c.field === 'evidenceCriteria')).toBe(true);
+    expect(diff.suggestions.length).toBeGreaterThan(0);
+    expect(diff.selectiveContext.oa).toHaveLength(2);
+  });
+
+  test('sin versión o sin cambios no marca desactualizado', () => {
+    const same = diffGamificationSource(
+      { sourcePlanningVersionId: 'v2', purpose: planning.purpose, oa: planning.learningObjectives, evidenceCriteria: planning.assessment.criteria },
+      planning
+    );
+    expect(same.outdated).toBe(false);
+    expect(same.changeCount).toBe(0);
+    const noVersion = diffGamificationSource({ oa: [] }, { version: 'v3', purpose: 'x' });
+    expect(noVersion.outdated).toBe(false);
+  });
+
+  test('aplica sync selectivo SOLO de los campos pedidos', () => {
+    const diff = diffGamificationSource(experience, planning);
+    const { update, applied } = applySelectiveSync(experience, diff.selectiveContext, ['oa', 'purpose']);
+    expect(applied).toEqual(['oa', 'purpose']);
+    expect(update.oa).toHaveLength(2);
+    expect(update.purpose).toBe('Propósito nuevo');
+    expect(update).not.toHaveProperty('evidenceCriteria');
+  });
+
+  test('ignora campos no sincronizables', () => {
+    const diff = diffGamificationSource(experience, planning);
+    const { update, applied } = applySelectiveSync(experience, diff.selectiveContext, ['narrative', 'title']);
+    expect(applied).toHaveLength(0);
+    expect(update).toEqual({});
   });
 });

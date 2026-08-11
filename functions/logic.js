@@ -2566,3 +2566,64 @@ export function exportExternalPromptPackage(pkg = {}, format = 'text') {
   if (fmt === 'json') return JSON.stringify(pkg, null, 2);
   return header + body;
 }
+
+// ===== U12: Integración con planificación (sync selectivo, nunca overwrite) =====
+// Sección 404/45.11: se conserva sourcePlanningVersionId; se compara con la
+// versión actual de la planificación y se generan diff + sugerencias. Jamás se
+// sobrescribe la experiencia automáticamente.
+export const SYNCABLE_FIELDS = ['oa', 'purpose', 'evidenceCriteria'];
+
+export function diffGamificationSource(experience = {}, planning = {}) {
+  const expVersion = experience.sourcePlanningVersionId || null;
+  const planVersion = planning.version != null ? String(planning.version) : null;
+  const outdated = planVersion !== null && expVersion !== null && planVersion !== expVersion;
+  const changes = [];
+
+  const mapOa = list => (Array.isArray(list) ? list : []).map(o => String(o.code || o.id || '')).filter(Boolean);
+  const expOa = new Set(mapOa(experience.oa));
+  const planOa = mapOa(planning.learningObjectives);
+  const oaAdded = [...new Set(planOa.filter(c => !expOa.has(c)))];
+  const oaRemoved = [...expOa].filter(c => !planOa.includes(c));
+  if (outdated) changes.push({ field: 'version', kind: 'changed', from: expVersion, to: planVersion });
+  if (oaAdded.length) changes.push({ field: 'oa', kind: 'added', items: oaAdded });
+  if (oaRemoved.length) changes.push({ field: 'oa', kind: 'removed', items: oaRemoved });
+  if (sanitizeInput(String(planning.purpose || '')) !== sanitizeInput(String(experience.purpose || ''))) {
+    changes.push({ field: 'purpose', kind: 'changed' });
+  }
+  const planCriteria = (planning.assessment?.criteria || planning.evaluation?.criteria || []).map(c => sanitizeInput(String(c))).filter(Boolean);
+  const expCriteria = (experience.evidenceCriteria || []).map(c => sanitizeInput(String(c))).filter(Boolean);
+  if (JSON.stringify(planCriteria) !== JSON.stringify(expCriteria)) changes.push({ field: 'evidenceCriteria', kind: 'changed' });
+
+  const suggestions = [];
+  if (oaAdded.length) suggestions.push('Los OA añadidos en la planificación podrían incorporarse a la experiencia (revisión docente).');
+  if (oaRemoved.length) suggestions.push('Hay OA retirados de la planificación: evalúa si la experiencia debe reflejarlo.');
+  if (changes.some(c => c.field === 'purpose')) suggestions.push('El propósito cambió en la planificación: considera actualizarlo.');
+  if (changes.some(c => c.field === 'evidenceCriteria')) suggestions.push('Los criterios de evidencia cambiaron: revisa si la experiencia debe actualizarlos.');
+
+  return {
+    outdated,
+    currentVersion: planVersion,
+    experienceVersion: expVersion,
+    changeCount: changes.length,
+    changes,
+    suggestions,
+    selectiveContext: {
+      oa: planOa.map(code => {
+        const o = (planning.learningObjectives || []).find(x => String(x.code || x.id || '') === code);
+        return { code, text: sanitizeInput(String(o?.text || '')) };
+      }),
+      purpose: sanitizeInput(String(planning.purpose || '')),
+      evidenceCriteria: planCriteria,
+    },
+  };
+}
+
+// Aplica SOLO los campos pedidos del contexto selectivo (sync manual del docente).
+export function applySelectiveSync(experience = {}, selectiveContext = {}, fields = []) {
+  const update = {};
+  const applied = (Array.isArray(fields) ? fields : []).filter(f => SYNCABLE_FIELDS.includes(f));
+  if (applied.includes('oa')) update.oa = Array.isArray(selectiveContext.oa) ? selectiveContext.oa : [];
+  if (applied.includes('purpose')) update.purpose = sanitizeInput(String(selectiveContext.purpose || ''));
+  if (applied.includes('evidenceCriteria')) update.evidenceCriteria = Array.isArray(selectiveContext.evidenceCriteria) ? selectiveContext.evidenceCriteria : [];
+  return { update, applied };
+}
