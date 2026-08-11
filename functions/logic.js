@@ -2,6 +2,7 @@
 // Extraida de functions/index.js para que index.test.js y scripts/eval-batch.mjs
 // la importen directamente en vez de duplicarla. Este modulo NO importa
 // firebase ni firebase-admin: es puro (sin db/auth/storage/initializeApp).
+import { randomBytes } from 'node:crypto';
 export const AI_PROVIDERS = {
   DEEPSEEK: {
     name: 'deepseek',
@@ -2178,4 +2179,164 @@ export function validateTermsAcceptance(data) {
   if (data.version !== TERMS_VERSION) return 'VERSION_TERMINOS_DESACTUALIZADA';
   if (typeof data.privacyVersion !== 'string' || data.privacyVersion !== PRIVACY_VERSION) return 'VERSION_PRIVACIDAD_DESACTUALIZADA';
   return null;
+}
+
+// ===== U8: Códigos de acceso y portal del participante =====
+// Sección 39: códigos aleatorios (>=8 chars, alfabeto amplio) sin IDs internos;
+// token de sesión por participante; alias seudónimo único por experiencia (40).
+export const EXPERIENCE_CODE_LENGTH = 8;
+export const EXPERIENCE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+export const PARTICIPANT_ALIAS_MAX = 24;
+export const PARTICIPANT_TOKEN_BYTES = 24;
+
+export function generateExperienceCode(length = EXPERIENCE_CODE_LENGTH, alphabet = EXPERIENCE_CODE_ALPHABET) {
+  let code = '';
+  const bytes = randomBytes(length);
+  for (let i = 0; i < length; i += 1) code += alphabet[bytes[i] % alphabet.length];
+  return code;
+}
+
+export function generateParticipantToken(bytes = PARTICIPANT_TOKEN_BYTES) {
+  return randomBytes(bytes).toString('hex');
+}
+
+export function normalizeExperienceCode(code) {
+  return String(code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// Seudónimo obligatorio (40): sanitiza PII (RUT/correo), recorta y limpia.
+export function normalizeParticipantAlias(alias) {
+  const cleaned = sanitizeInput(String(alias || '')).trim().slice(0, PARTICIPANT_ALIAS_MAX);
+  return cleaned;
+}
+
+export function isValidExperienceCode(code) {
+  const normalized = normalizeExperienceCode(code);
+  return normalized.length >= 4 && EXPERIENCE_CODE_ALPHABET.includes(normalized[0]);
+}
+
+export function isExperienceJoinable(experience, now = new Date()) {
+  if (!experience) return { ok: false, reason: 'CODIGO_INVALIDO' };
+  if (experience.status !== 'published') return { ok: false, reason: 'EXPERIENCIA_CERRADA' };
+  const current = now.getTime();
+  const from = experience.availableFrom ? new Date(experience.availableFrom).getTime() : null;
+  const to = experience.availableTo ? new Date(experience.availableTo).getTime() : null;
+  if (from && current < from) return { ok: false, reason: 'EXPERIENCIA_CERRADA' };
+  if (to && current > to) return { ok: false, reason: 'EXPERIENCIA_CERRADA' };
+  return { ok: true, mode: experience.mode || 'individual' };
+}
+
+// Construye el doc participante (seudónimo, sin correo/nombre) + progreso embebido.
+export function buildParticipantDocument(alias, experienceId, mode = 'individual', token) {
+  const now = new Date().toISOString();
+  return {
+    alias,
+    teamAlias: null,
+    mode,
+    participantToken: token,
+    joinedAt: now,
+    lastActiveAt: now,
+    status: 'active',
+    experienceId,
+    progress: {
+      points: 0,
+      missionsCompleted: [],
+      badges: [],
+      level: 1,
+      pctComplete: 0,
+      updatedAt: now,
+    },
+  };
+}
+
+// ===== U9: Evidencias, revisión docente y retroalimentación =====
+// Sección 29: entrega simple (texto, vínculos https, archivo imagen/PDF <=2 MB);
+// toda entrega valida PII y escapa contenido (sin HTML renderizado).
+export const EVIDENCE_TEXT_MAX = 2000;
+export const EVIDENCE_STATUSES = ['pending', 'approved', 'rejected'];
+export const EVIDENCE_FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+// Sanitiza texto sin HTML renderizado: elimina etiquetas y borra PII.
+export function sanitizePlainText(text) {
+  return sanitizeInput(String(text || '').replace(/<[^>]*>/g, ' '));
+}
+
+export function validateEvidenceLinks(links) {
+  return (Array.isArray(links) ? links : [])
+    .map(link => sanitizeInput(String(link || '')).trim())
+    .filter(link => /^https:\/\/\S+$/.test(link))
+    .slice(0, 10);
+}
+
+// Valida la entrega: texto obligatorio, URL https, archivo opcional <=2 MB.
+export function validateEvidenceInput(input = {}) {
+  const errors = [];
+  const text = sanitizePlainText(String(input.text || '')).trim();
+  if (!text) errors.push({ code: 'TEXTO_REQUERIDO', message: 'La evidencia necesita una descripción.' });
+  else if (text.length > EVIDENCE_TEXT_MAX) errors.push({ code: 'TEXTO_EXCESIVO', message: 'Evidencia demasiado extensa (máx. 2000 caracteres).' });
+  if (input.fileUrl && !/^https:\/\/\S+$/.test(String(input.fileUrl))) errors.push({ code: 'URL_INVALIDA', message: 'Enlace externo no permitido (solo https).' });
+  else if (input.fileSize && Number(input.fileSize) > EVIDENCE_FILE_MAX_BYTES) errors.push({ code: 'ARCHIVO_EXCESIVO', message: 'El archivo supera el límite de 2 MB.' });
+  return { errors, text, links: validateEvidenceLinks(input.links) };
+}
+
+// Acceso a misión: debe existir y cumplirse TODA condición de desbloqueo.
+export function isMissionAccessible(experience, missionId, completed = []) {
+  const missions = Array.isArray(experience?.missions) ? experience.missions : [];
+  const mission = missions.find(m => String(m.id) === String(missionId));
+  if (!mission) return { ok: false, reason: 'MISIÓN_INEXISTENTE', mission: null };
+  const done = new Set((completed || []).map(id => String(id)));
+  const blockers = (mission.unlockConditions || [])
+    .map(condition => (typeof condition === 'string' ? condition : condition?.missionId))
+    .filter(Boolean)
+    .filter(dep => dep !== mission.id && !done.has(String(dep)));
+  return { ok: blockers.length === 0, reason: blockers.length ? 'MISION_INACCESIBLE' : 'OK', mission, blockers };
+}
+
+export function buildEvidenceRecord(experienceId, participantToken, missionId, validation) {
+  const now = new Date().toISOString();
+  return {
+    participantToken,
+    missionId: String(missionId),
+    text: validation.text,
+    links: validation.links,
+    fileUrl: validation.fileUrl ? String(validation.fileUrl) : null,
+    status: 'pending',
+    reviewerUid: null,
+    reviewComment: null,
+    createdAt: now,
+    reviewedAt: null,
+    experienceId,
+  };
+}
+
+// Aplica la aprobación al progreso (función pura/idempotente). Si la misión ya
+// estaba completada no suma puntos dos veces (SEC-03 uniqueKey).
+export function applyEvidenceApproval(progress = {}, mission = {}, points = 0, totalMissions = 0) {
+  const completed = Array.isArray(progress.missionsCompleted) ? progress.missionsCompleted.map(id => String(id)) : [];
+  const missionId = mission.id ? String(mission.id) : null;
+  const already = missionId ? completed.includes(missionId) : false;
+  const nextCompleted = (!missionId || already) ? completed : [...completed, missionId];
+  const missionPoints = already ? 0 : (Number.isFinite(Number(mission.points ?? points)) ? Number(mission.points ?? points) : points);
+  const nextPoints = (Number(progress.points) || 0) + missionPoints;
+  const base = Math.max(1, Math.floor(nextPoints / 100) + 1);
+  const pct = totalMissions > 0 ? Math.min(100, Math.round((nextCompleted.length / totalMissions) * 100)) : Math.min(100, nextCompleted.length * 25);
+  return {
+    points: nextPoints,
+    missionsCompleted: nextCompleted,
+    badges: Array.isArray(progress.badges) ? progress.badges : [],
+    level: base,
+    pctComplete: pct,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildTeacherFeedback(experienceId, participantToken, missionId, text, type = 'teacher') {
+  return {
+    experienceId,
+    participantToken,
+    missionId: missionId || null,
+    type,
+    text: sanitizePlainText(String(text || '')).trim().slice(0, EVIDENCE_TEXT_MAX),
+    createdAt: new Date().toISOString(),
+  };
 }

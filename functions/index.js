@@ -75,7 +75,19 @@ import {
   validateGamificationDraft,
   buildGamificationSectionPrompt,
   normalizeGamifiedExperience,
-  validateGamifiedExperience
+  validateGamifiedExperience,
+  generateExperienceCode,
+  generateParticipantToken,
+  normalizeExperienceCode,
+  normalizeParticipantAlias,
+  isValidExperienceCode,
+  isExperienceJoinable,
+  buildParticipantDocument,
+  validateEvidenceInput,
+  isMissionAccessible,
+  buildEvidenceRecord,
+  applyEvidenceApproval,
+  buildTeacherFeedback
 } from './logic.js';
 
 export {
@@ -1013,6 +1025,7 @@ export const createGamifiedExperience = onCall(
       description: context.purpose,
       narrative: '',
       status: 'draft',
+      code: generateExperienceCode(),
       authorUid: userId,
       orgId: planning.orgId || null,
       sourcePlanningId: planningId,
@@ -1201,6 +1214,172 @@ export const regenerateGamificationSection = onCall(
     await recordBudgetUsage(aiResult.cost);
 
     return { section, content: newContent, status: 'ok' };
+  }
+);
+
+// U8: entrada de un participante (invitado seudónimo, sin cuenta) a una
+// experiencia publicada mediante código de acceso. Devuelve un token de sesión
+// que el portal usa para leer progreso y entregar evidencia (U9).
+export const joinGamifiedExperience = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    await runRetentionSweep();
+    const { code, alias } = request.data || {};
+    const normalizedCode = normalizeExperienceCode(code);
+    if (!isValidExperienceCode(normalizedCode)) throw new Error('CODIGO_INVALIDO');
+    const normalizedAlias = normalizeParticipantAlias(alias);
+    if (normalizedAlias.length < 2) throw new Error('ALIAS_OCUPADO');
+
+    const pubSnap = await db.collection('gamified-experiences')
+      .where('code', '==', normalizedCode)
+      .limit(1)
+      .get();
+    if (pubSnap.empty) throw new Error('CODIGO_INVALIDO');
+    const expDoc = pubSnap.docs[0];
+    const experience = expDoc.data();
+    if (experience.status !== 'published') throw new Error('CODIGO_INVALIDO');
+    const joinable = isExperienceJoinable(experience);
+    if (!joinable.ok) throw new Error(joinable.reason);
+
+    // Alias único por experiencia (seudónimo, no PII).
+    const aliasSnap = await db.collection('gamified-experiences').doc(expDoc.id)
+      .collection('participants')
+      .where('alias', '==', normalizedAlias)
+      .limit(1)
+      .get();
+    if (!aliasSnap.empty) throw new Error('ALIAS_OCUPADO');
+
+    const token = generateParticipantToken();
+    const now = new Date().toISOString();
+    const participant = buildParticipantDocument(normalizedAlias, expDoc.id, joinable.mode || 'individual', token);
+    await db.collection('gamified-experiences').doc(expDoc.id)
+      .collection('participants').doc(token).set(participant);
+
+    await db.collection('gamification-audit-logs').add({
+      expId: expDoc.id, participantToken: token, action: 'gamify_join', createdAt: now,
+    });
+    await db.collection('audit-logs').add({
+      userId: request.auth?.uid || 'invitado',
+      action: 'gamify_join',
+      resource: 'gamified_experience',
+      resourceId: expDoc.id,
+      createdAt: now,
+    });
+
+    return {
+      participantToken: token,
+      alias: normalizedAlias,
+      experienceId: expDoc.id,
+      title: experience.title,
+      mode: joinable.mode || 'individual',
+      missions: Array.isArray(experience.missions) ? experience.missions.map(m => ({ id: m.id, title: m.title, type: m.type, points: m.points })).slice(0, 20) : [],
+    };
+  }
+);
+
+// U9: un participante entrega evidencia para una misión (token como credencial,
+// sin cuenta). La entrega queda pendiente de revisión docente.
+export const submitMissionEvidence = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    const { participantToken, missionId, text, links, fileUrl, fileSize, expId } = request.data || {};
+    if (!participantToken || !missionId) throw new Error('DATOS_INCOMPLETOS');
+    if (!expId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+
+    const participantDocRef = db.collection('gamified-experiences').doc(expId).collection('participants').doc(participantToken);
+    const participantSnap = await participantDocRef.get();
+    if (!participantSnap.exists || participantSnap.data().status !== 'active') throw new Error('TOKEN_INVALIDO');
+
+    const expSnap = await db.collection('gamified-experiences').doc(expId).get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    if (experience.status !== 'published') throw new Error('EXPERIENCIA_CERRADA');
+
+    const existing = await participantDocRef.collection('evidence').where('missionId', '==', String(missionId)).limit(1).get();
+    if (!existing.empty && existing.docs[0].data().status !== 'rejected') throw new Error('EVIDENCIA_YA_ENVIADA');
+
+    const validation = validateEvidenceInput({ text, links, fileUrl, fileSize });
+    if (validation.errors.length > 0) {
+      await db.collection('audit-logs').add({ userId: 'participante', action: 'gamify_evidence_submit_invalid', resource: 'gamified_experience', resourceId: expId, errors: validation.errors, createdAt: new Date().toISOString() });
+      throw new Error(validation.errors[0].code);
+    }
+
+    const progress = participantSnap.data().progress || {};
+    const accessibility = isMissionAccessible(experience, missionId, progress.missionsCompleted);
+    if (!accessibility.ok) throw new Error('MISION_INACCESIBLE');
+
+    const record = buildEvidenceRecord(expId, participantToken, missionId, { ...validation, fileUrl: fileUrl || null });
+    const evidenceRef = await participantDocRef.collection('evidence').add(record);
+    const now = new Date().toISOString();
+
+    await participantDocRef.update({ lastActiveAt: now });
+    await db.collection('gamification-audit-logs').add({ expId, participantToken, action: 'gamify_evidence_submit', missionId: String(missionId), createdAt: now });
+    await db.collection('audit-logs').add({ userId: 'participante', action: 'gamify_evidence_submit', resource: 'gamified_experience', resourceId: expId, missionId: String(missionId), createdAt: now });
+
+    return { status: 'pending', evidenceId: evidenceRef.id };
+  }
+);
+
+// U9: el docente propietario (o UTP) aprueba o rechaza una evidencia. La
+// aprobación dispara puntos/progreso (idempotente) y retroalimentación docente.
+export const reviewMissionEvidence = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    const { expId, evidenceId, approve, comment } = request.data || {};
+    if (!expId || !evidenceId || typeof approve !== 'boolean') throw new Error('DATOS_INCOMPLETOS');
+
+    const expSnap = await db.collection('gamified-experiences').doc(expId).get();
+    if (!expSnap.exists) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
+    const experience = expSnap.data();
+    if (experience.authorUid !== request.auth.uid) throw new Error('ACCESO_NO_AUTORIZADO');
+
+    const participantsSnap = await db.collection('gamified-experiences').doc(expId)
+      .collection('participants')
+      .where('status', '==', 'active')
+      .get();
+    let evidenceRef = null;
+    let evidence = null;
+    let participantToken = null;
+    for (const p of participantsSnap.docs) {
+      const evSnap = await p.ref.collection('evidence').doc(evidenceId).get();
+      if (evSnap.exists) { evidenceRef = evSnap.ref; evidence = evSnap.data(); participantToken = p.id; break; }
+    }
+    if (!evidenceRef) throw new Error('EVIDENCIA_NO_ENCONTRADA');
+    if (evidence.status !== 'pending') throw new Error('EVIDENCIA_YA_REVISADA');
+
+    const now = new Date().toISOString();
+    const safeComment = String(comment || '').slice(0, 1000);
+    await evidenceRef.update({
+      status: approve ? 'approved' : 'rejected',
+      reviewerUid: request.auth.uid,
+      reviewComment: safeComment,
+      reviewedAt: now,
+    });
+
+    if (approve) {
+      const participantRef = db.collection('gamified-experiences').doc(expId).collection('participants').doc(participantToken);
+      const participantSnap = await participantRef.get();
+      const mission = (experience.missions || []).find(m => String(m.id) === String(evidence.missionId));
+      const totalMissions = Array.isArray(experience.missions) ? experience.missions.length : 0;
+      const nextProgress = applyEvidenceApproval(
+        participantSnap.exists ? participantSnap.data().progress || {} : {},
+        mission || {},
+        mission?.points || 0,
+        totalMissions
+      );
+      await participantRef.update({ progress: nextProgress, lastActiveAt: now });
+    }
+
+    if (safeComment) {
+      const feedback = buildTeacherFeedback(expId, participantToken, evidence.missionId, safeComment);
+      await db.collection('gamified-experiences').doc(expId).collection('feedback').add(feedback);
+    }
+
+    await db.collection('gamification-audit-logs').add({ expId, participantToken, action: 'gamify_evidence_review', evidenceId, approve, createdAt: now });
+    await db.collection('audit-logs').add({ userId: request.auth.uid, action: 'gamify_evidence_review', resource: 'gamified_experience', resourceId: expId, evidenceId, approve, createdAt: now });
+
+    return { status: approve ? 'approved' : 'rejected', evidenceId };
   }
 );
 

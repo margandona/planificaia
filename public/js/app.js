@@ -471,6 +471,7 @@ async function resolveRoute() {
   if (hash.startsWith('/unirme/')) return (await import('./pages/institucional.js')).JoinOrgPage;
   if (hash === '/institucional') return (await import('./pages/institucional.js')).InstitucionalPage;
   if (hash === '/gamificaciones') return (await import('./pages/gamificaciones.js')).GamificacionesPage;
+  if (hash.startsWith('/participar/')) return (await import('./pages/participar.js')).ParticipatePage;
 
   const routes = {
     '/': LandingPage,

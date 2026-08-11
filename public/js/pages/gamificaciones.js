@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, reviewMissionEvidenceFn } from '../core.js';
 
 // U7: editor de experiencias gamificadas (constructor nativo, gated por flag).
 const GamificacionesPage = defineComponent({
@@ -20,6 +20,46 @@ const GamificacionesPage = defineComponent({
     const regenBusy = reactive({});
     const regenOk = reactive({});
     const regenErr = reactive({});
+
+    const evidenceByExp = reactive({});
+    const evKey = (expId, pId, eId, status) => `${expId}:${pId}:${eId}:${status}`;
+    const reviewBusy = reactive({});
+    const reviewOk = reactive({});
+    const reviewErr = reactive({});
+
+    const loadEvidence = async (exp) => {
+      const list = [];
+      try {
+        const participantsSnap = await getDocs(query(collection(db, 'gamified-experiences', exp.id, 'participants'), limit(200)));
+        for (const p of participantsSnap.docs) {
+          const evSnap = await getDocs(query(collection(db, 'gamified-experiences', exp.id, 'participants', p.id, 'evidence'), orderBy('createdAt', 'desc'), limit(50)));
+          evSnap.docs.forEach(ev => list.push({ evidenceId: ev.id, participantToken: p.id, alias: p.data().alias || p.id, ...ev.data() }));
+        }
+        evidenceByExp[exp.id] = list;
+      } catch (e) {
+        reviewErr[exp.id] = 'No se pudieron cargar las evidencias.';
+        reportError(e);
+      }
+    };
+
+    const doReview = async (exp, ev, approve) => {
+      reviewBusy[evKey(exp.id, ev.participantToken, ev.evidenceId, ev.status)] = true;
+      reviewOk[exp.id] = ''; reviewErr[exp.id] = '';
+      try {
+        const res = await reviewMissionEvidenceFn({ expId: exp.id, evidenceId: ev.evidenceId, approve, comment: ev.reviewDraft || '' });
+        reviewOk[exp.id] = approve ? 'Evidencia aprobada: se otorgaron los puntos.' : 'Evidencia rechazada.';
+        await loadEvidence(exp);
+      } catch (e) {
+        const m = {
+          EVIDENCIA_YA_REVISADA: 'Esta evidencia ya fue revisada.',
+          EVIDENCIA_NO_ENCONTRADA: 'Evidencia no encontrada.',
+          ACCESO_NO_AUTORIZADO: 'Solo el autor de la experiencia puede revisar.',
+        }[e.message] || mapError(e) || 'No se pudo revisar la evidencia.';
+        reviewErr[exp.id] = m;
+      } finally {
+        reviewBusy[evKey(exp.id, ev.participantToken, ev.evidenceId, ev.status)] = false;
+      }
+    };
 
     const statusBadge = (status) => {
       const map = {
@@ -162,6 +202,14 @@ const GamificacionesPage = defineComponent({
             ])
           )) : null,
 
+          exp.code ? h('div', { class: 'px-4 pb-3 border-t border-slate-100 pt-3' }, [
+            h('div', { class: 'flex flex-wrap items-center gap-2' }, [
+              h('span', { class: 'text-xs font-medium text-slate-500' }, 'Acceso participantes'),
+              h('code', { class: 'bg-slate-100 px-2 py-0.5 rounded text-xs font-bold tracking-widest' }, exp.code),
+              h('a', { href: `#/participar/${exp.code}`, class: 'text-xs text-violet-600 hover:underline' }, 'Enlace del portal'),
+            ]),
+          ]) : null,
+
           h('div', { class: 'p-4 border-t border-slate-100' }, [
             h('p', { class: 'text-xs font-medium text-slate-500 mb-2' }, 'Regenerar sección'),
             h('div', { class: 'space-y-2' }, [
@@ -174,6 +222,45 @@ const GamificacionesPage = defineComponent({
               regenOk[`${exp.id}:${regenSel[`sel-${exp.id}`] || 'narrative'}`] ? h('p', { class: 'text-xs text-green-600' }, regenOk[`${exp.id}:${regenSel[`sel-${exp.id}`] || 'narrative'}`]) : null,
               regenErr[`${exp.id}:${regenSel[`sel-${exp.id}`] || 'narrative'}`] ? h('p', { class: 'text-xs text-red-600' }, regenErr[`${exp.id}:${regenSel[`sel-${exp.id}`] || 'narrative'}`]) : null,
             ]),
+          ]),
+
+          h('div', { class: 'p-4 border-t border-slate-100' }, [
+            h('div', { class: 'flex items-center justify-between mb-2' }, [
+              h('p', { class: 'text-xs font-medium text-slate-500' }, 'Evidencias de participantes'),
+              h('button', { class: 'text-xs text-violet-600 hover:underline', onClick: () => loadEvidence(exp) }, 'Cargar'),
+            ]),
+            reviewErr[exp.id] ? h('p', { class: 'text-xs text-red-600 mb-2' }, reviewErr[exp.id]) : null,
+            reviewOk[exp.id] ? h('p', { class: 'text-xs text-green-600 mb-2' }, reviewOk[exp.id]) : null,
+            !evidenceByExp[exp.id]
+              ? h('p', { class: 'text-xs text-slate-400' }, 'Pulsa "Cargar" para ver las entregas.')
+              : evidenceByExp[exp.id].length === 0
+                ? h('p', { class: 'text-xs text-slate-400' }, 'Aún no hay evidencias.')
+                : h('div', { class: 'space-y-2' }, evidenceByExp[exp.id].map((ev) => {
+                    const key = evKey(exp.id, ev.participantToken, ev.evidenceId, ev.status);
+                    return h('div', { class: `border rounded-lg p-2 ${ev.status === 'pending' ? 'border-amber-200 bg-amber-50' : ev.status === 'approved' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}` }, [
+                      h('div', { class: 'flex items-center gap-2 text-xs mb-1' }, [
+                        h('span', { class: 'font-semibold text-slate-700' }, ev.alias),
+                        h('span', { class: 'text-slate-400' }, '·'),
+                        h('span', { class: 'text-slate-500' }, ev.missionId ? `Misión ${ev.missionId}` : ''),
+                        h('span', { class: 'ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-medium capitalize', class: ev.status === 'pending' ? 'bg-amber-100 text-amber-700' : ev.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }, ev.status),
+                      ]),
+                      h('p', { class: 'text-xs text-slate-700 mb-2 whitespace-pre-wrap' }, ev.text || ''),
+                      (ev.links || []).length > 0 ? h('div', { class: 'flex flex-wrap gap-1 mb-2' }, ev.links.map(l => h('a', { href: l, target: '_blank', rel: 'noopener', class: 'text-xs text-blue-600 underline' }, l))) : null,
+                      ev.reviewComment ? h('p', { class: 'text-xs text-slate-500 italic mb-2' }, `Comentario: ${ev.reviewComment}`) : null,
+                      ev.status === 'pending'
+                        ? h('div', { class: 'space-y-2' }, [
+                            (reviewErr[exp.id] && reviewOk[exp.id] === '') ? null : null,
+                            h('div', { class: 'flex gap-2' }, [
+                              h('input', { class: 'border border-slate-300 rounded-lg px-2 py-1 text-xs flex-1', placeholder: 'Comentario (opcional)', value: ev.reviewDraft || '', onInput: (e) => { ev.reviewDraft = e.target.value; } }),
+                            ]),
+                            h('div', { class: 'flex gap-2' }, [
+                              h('button', { class: 'text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50', disabled: !!reviewBusy[key], onClick: () => doReview(exp, ev, true) }, reviewBusy[key] ? 'Aprobando...' : 'Aprobar'),
+                              h('button', { class: 'text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 transition disabled:opacity-50', disabled: !!reviewBusy[key], onClick: () => doReview(exp, ev, false) }, reviewBusy[key] ? 'Rechazando...' : 'Rechazar'),
+                            ]),
+                          ])
+                        : null,
+                    ]);
+                  })),
           ]),
         ])
       )),

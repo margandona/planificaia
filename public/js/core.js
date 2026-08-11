@@ -151,6 +151,9 @@ const setUserPlanFn = httpsCallable(fx, 'setUserPlan');
 const createGamifiedExperienceFn = httpsCallable(fx, 'createGamifiedExperience');
 const generateGamificationDraftFn = httpsCallable(fx, 'generateGamificationDraft');
 const regenerateGamificationSectionFn = httpsCallable(fx, 'regenerateGamificationSection');
+const joinGamifiedExperienceFn = httpsCallable(fx, 'joinGamifiedExperience');
+const submitMissionEvidenceFn = httpsCallable(fx, 'submitMissionEvidence');
+const reviewMissionEvidenceFn = httpsCallable(fx, 'reviewMissionEvidence');
 
 const isAdmin = () => store.claims?.admin === true || store.claims?.role === 'admin';
 const isOrgAdmin = () => ['owner', 'coordinator'].includes(store.orgRole);
@@ -339,4 +342,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn };

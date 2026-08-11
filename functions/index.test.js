@@ -96,7 +96,22 @@ import {
   buildGamificationSourceContext,
   buildGamificationDraftPrompt,
   validateGamificationDraft,
-  buildGamificationSectionPrompt
+  buildGamificationSectionPrompt,
+  EXPERIENCE_CODE_LENGTH,
+  EXPERIENCE_CODE_ALPHABET,
+  PARTICIPANT_ALIAS_MAX,
+  generateExperienceCode,
+  generateParticipantToken,
+  normalizeExperienceCode,
+  normalizeParticipantAlias,
+  isValidExperienceCode,
+  isExperienceJoinable,
+  buildParticipantDocument,
+  validateEvidenceInput,
+  isMissionAccessible,
+  buildEvidenceRecord,
+  applyEvidenceApproval,
+  buildTeacherFeedback
 } from './logic.js';
 
 // Helpers re-importados desde logic.js (B12): ya no se espejan en el test.
@@ -1456,5 +1471,104 @@ describe('U7 - Constructor de experiencias gamificadas', () => {
     expect(prompt.system).toContain('Regeneras SOLO la sección');
     expect(prompt.user).toContain('Narrativa actual');
     expect(prompt.user).toContain('Hazla más breve');
+  });
+});
+
+describe('U8 - Portal del participante', () => {
+  test('genera códigos de acceso y tokens criptográficos con alfabeto seguro', () => {
+    const code = generateExperienceCode();
+    expect(code).toHaveLength(EXPERIENCE_CODE_LENGTH);
+    expect(code).toMatch(new RegExp(`^[${EXPERIENCE_CODE_ALPHABET}]+$`));
+    expect(generateParticipantToken()).toMatch(/^[0-9a-f]{48}$/);
+    expect([...code].filter(c => /[OIL]/.test(c))).toHaveLength(0);
+  });
+
+  test('normaliza códigos y seudónimos sin PII', () => {
+    expect(normalizeExperienceCode(' ab-cd 12 ')).toBe('ABCD12');
+    expect(normalizeParticipantAlias('León de la selva marginal')).toBe('León de la selva marginal'.slice(0, PARTICIPANT_ALIAS_MAX));
+    expect(normalizeParticipantAlias(' León  de  la selva ').length).toBeLessThanOrEqual(PARTICIPANT_ALIAS_MAX);
+    expect(normalizeParticipantAlias(`contacto@correo.cl ${'x'.repeat(50)}`)).not.toMatch(/@/);
+    expect(normalizeParticipantAlias('x').length).toBeLessThanOrEqual(PARTICIPANT_ALIAS_MAX);
+    expect(isValidExperienceCode('ABC123DE')).toBe(true);
+    expect(isValidExperienceCode('ab')).toBe(false);
+  });
+
+  test('valida acceso por estado y ventana de fechas', () => {
+    expect(isExperienceJoinable(null).reason).toBe('CODIGO_INVALIDO');
+    expect(isExperienceJoinable({ status: 'draft' }).reason).toBe('EXPERIENCIA_CERRADA');
+    expect(isExperienceJoinable({ status: 'published' }).ok).toBe(true);
+    expect(isExperienceJoinable({ status: 'published', availableTo: '2020-01-01T00:00:00.000Z' }).reason).toBe('EXPERIENCIA_CERRADA');
+    expect(isExperienceJoinable({ status: 'published', mode: 'teams' }).mode).toBe('teams');
+  });
+
+  test('construye el documento participante seudónimo con progreso embebido', () => {
+    const doc = buildParticipantDocument('Águila', 'exp-1', 'individual', 'tok-123');
+    expect(doc.alias).toBe('Águila');
+    expect(doc.status).toBe('active');
+    expect(doc.progress.points).toBe(0);
+    expect(doc.progress.pctComplete).toBe(0);
+    expect(doc).not.toHaveProperty('email');
+    expect(doc).not.toHaveProperty('name');
+  });
+});
+
+describe('U9 - Evidencias, revisión docente y retroalimentación', () => {
+  const experience = {
+    status: 'published',
+    missions: [
+      { id: 'm1', title: 'Misión 1', points: 10 },
+      { id: 'm2', title: 'Misión 2', points: 20, unlockConditions: ['m1'] },
+    ],
+  };
+
+  test('valida entregas de evidencia (texto obligatorio, https, límite 2 MB)', () => {
+    const ok = validateEvidenceInput({ text: 'Completé la misión', links: ['https://ejemplo.cl/evidencia'], fileSize: 1024 });
+    expect(ok.errors).toHaveLength(0);
+    expect(ok.text).toBe('Completé la misión');
+
+    const empty = validateEvidenceInput({ text: '' });
+    expect(empty.errors.map(e => e.code)).toContain('TEXTO_REQUERIDO');
+
+    const big = validateEvidenceInput({ text: 'x', fileSize: 3 * 1024 * 1024 });
+    expect(big.errors.map(e => e.code)).toContain('ARCHIVO_EXCESIVO');
+
+    const badLink = validateEvidenceInput({ text: 'x', links: ['javascript:alert(1)', 'https://ok.cl'] });
+    expect(badLink.links).toEqual(['https://ok.cl']);
+  });
+
+  test('verifica accesibilidad de misiones por condiciones de desbloqueo', () => {
+    const stuck = isMissionAccessible(experience, 'm2', []);
+    expect(stuck.ok).toBe(false);
+    expect(stuck.reason).toBe('MISION_INACCESIBLE');
+    expect(isMissionAccessible(experience, 'm2', ['m1']).ok).toBe(true);
+    expect(isMissionAccessible(experience, 'm1', []).ok).toBe(true);
+    expect(isMissionAccessible(experience, 'nope', []).reason).toBe('MISIÓN_INEXISTENTE');
+  });
+
+  test('construye el registro de evidencia pendiente sin HTML', () => {
+    const v = validateEvidenceInput({ text: '<script>alert(1)</script> ¿PII? contacto@mail.cl ' });
+    const record = buildEvidenceRecord('exp-1', 'tok-1', 'm1', v);
+    expect(record.status).toBe('pending');
+    expect(record.text).not.toMatch(/<script/);
+    expect(record.text).not.toMatch(/@/);
+    expect(record.links).toEqual([]);
+    expect(record.reviewedAt).toBeNull();
+  });
+
+  test('aplica la aprobación de forma idempotente (no dobla puntos)', () => {
+    const once = applyEvidenceApproval({ points: 0, missionsCompleted: [], badges: [], level: 1, pctComplete: 0 }, experience.missions[0], 10, 2);
+    const twice = applyEvidenceApproval(once, experience.missions[0], 10, 2);
+    expect(once.points).toBe(10);
+    expect(twice.points).toBe(10);
+    expect(twice.missionsCompleted).toEqual(['m1']);
+    expect(once.level).toBe(1);
+    expect(once.pctComplete).toBe(50);
+  });
+
+  test('construye retroalimentación docente escapada', () => {
+    const fb = buildTeacherFeedback('exp-1', 'tok-1', 'm2', 'Muy bien <b>trabajo</b>');
+    expect(fb.type).toBe('teacher');
+    expect(fb.text).not.toMatch(/<b>/);
+    expect(fb.missionId).toBe('m2');
   });
 });

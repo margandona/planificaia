@@ -1130,8 +1130,16 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U8 — Portal del participante
 - `joinGamifiedExperience`, modo invitado/equipos/presentación; página participante (hosting); código + QR.
 
+**Cierre (2026-08-10):** portal del participante implementado.
+- **Códigos de acceso criptográficos:** `generateExperienceCode` (8 chars, alfabeto sin caracteres confundibles, `node:crypto`) + `generateParticipantToken` (hex 48, por sesión). El código se asigna al crear la experiencia (`createGamifiedExperience`).
+- **`joinGamifiedExperience`** (invitado, sin cuenta): valida código y estado (`CODIGO_INVALIDO`, `EXPERIENCIA_CERRADA`), reutiliza `isExperienceJoinable` (estado + ventana `availableFrom/availableTo`), exige alias **seudónimo único** por experiencia (`ALIAS_OCUPADO`, sin correo/nombre, PII sanitizada) y persiste `participants/{token}` con progreso embebido. Consulta single-field de `code` (sin índices compuestos).
+- **Frontend:** ruta `#/participar/{código}` con portal invitado (`participar.js`) para ingresar código + seudónimo; enlace "Acceso participantes" con el código y link del portal en el editor (`gamificaciones.js`). Sin dependencias nuevas (QR: el enlace del portal es el punto de entrada, la URL codificable se pueble en U10).
+- **Verificación:** `pnpm --dir functions test:unit` 160/160 (4 tests U8); `node --check` en `logic.js`, `index.js`, `index.test.js`, `core.js`, `participar.js`, `gamificaciones.js` y `app.js`.
+
 ### Fase U9 — Evidencias y retroalimentación
 - `submitMissionEvidence`, `reviewMissionEvidence`, `experience-feedback`.
+
+**Cierre (2026-08-10):** evidencias y retroalimentación implementadas. `submitMissionEvidence` (invitado vía token, valida misión accesible → `MISION_INACCESIBLE`, entrega pendiente), `reviewMissionEvidence` (owner, idempotente → `EVIDENCIA_YA_REVISADA`, la aprobación dispara puntos/progreso con `applyEvidenceApproval`), retroalimentación docente en `feedback` y auditorías `gamify_evidence_submit`/`gamify_evidence_review` (doble: `audit-logs` + `gamification-audit-logs`). Pureza en `logic.js` (`sanitizePlainText` sin HTML/PII, `validateEvidenceInput`, `isMissionAccessible`, `buildEvidenceRecord`, `applyEvidenceApproval`, `buildTeacherFeedback`); portal en `public/js/pages/participar.js` y panel de revisión en `public/js/pages/gamificaciones.js`; wrappers `submitMissionEvidenceFn`/`reviewMissionEvidenceFn` en `core.js`.
 
 ### Fase U10 — Publicación y analítica básica
 - `publish/unpublish/archive`, `calculateExperienceProgress`, panel de progreso del docente.
