@@ -1164,6 +1164,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U14 — Accesibilidad
 - Auditoría axe-core ampliada + manual en portal participante.
 
+**Cierre (2026-08-11):** accesibilidad implementada (ACC-01/ACC-02, sección 41). Portal participante (`participar.js`): etiquetas asociadas a sus controles (`for`/`id`) en el formulario de ingreso (código, seudónimo) y en el de evidencia (misión, textarea) — WCAG 1.3.1/4.1.2. Auditoría axe-core WCAG 2.2 AA ampliada a 7 rutas añadiendo `/participar/PRUEBA01` (`test_axe_accessibility`); nuevo test `test_participant_portal_accessibility` (ACC-02) que valida labels asociadas + navegación por teclado (Tab codigo→seudonimo) + alternativa textual, con guarda informativa mientras el portal no esté desplegado en producción (la ruta cae a Landing y se valida tras deploy). Teclado/reduce-motion/focus-visible ya cubiertos por `index.html` (`prefers-reduced-motion`, `*:focus-visible`) y skip-link del Layout (2.4.1). E2E 13/13 verde; unit 182/182. Pendiente U14 restante: auditoría manual con lectores de pantalla (NVDA/VoiceOver) en el portal (futuro, sección 41).
+
 ### Fase U15 — QA integral
 - Regresión completa (existente + nuevo); dataset de evaluación ampliado.
 

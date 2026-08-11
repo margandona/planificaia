@@ -77,13 +77,13 @@ const ParticipatePage = defineComponent({
           class: 'bg-slate-50 rounded-lg p-3',
         }, [
           h('p', { class: 'text-xs font-medium text-slate-500 mb-2' }, 'Entrega tu evidencia'),
-          h('label', { class: 'block text-xs font-medium text-slate-500' }, 'Misión'),
-          h('select', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2', value: selMission.value, onChange: (e) => { selMission.value = e.target.value; } }, [
+          h('label', { class: 'block text-xs font-medium text-slate-500', for: 'mision' }, 'Misión'),
+          h('select', { id: 'mision', class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2', value: selMission.value, onChange: (e) => { selMission.value = e.target.value; } }, [
             h('option', { value: '', disabled: true }, 'Selecciona una misión'),
             ...(joined.value.missions || []).map(m => h('option', { value: m.id }, `${m.title || m.id} (${m.points || 0} pts)`)),
           ]),
-          h('label', { class: 'block text-xs font-medium text-slate-500' }, '¿Qué hiciste? (máx. 2000 caracteres)'),
-          h('textarea', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2', rows: 3, value: proofText.value, onInput: (e) => { proofText.value = e.target.value; }, maxlength: 2000 }),
+          h('label', { class: 'block text-xs font-medium text-slate-500', for: 'evidencia' }, '¿Qué hiciste? (máx. 2000 caracteres)'),
+          h('textarea', { id: 'evidencia', class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2', rows: 3, value: proofText.value, onInput: (e) => { proofText.value = e.target.value; }, maxlength: 2000 }),
           proofErr.value ? Alert('error', proofErr.value) : null,
           proofStatus.value ? Alert('success', proofStatus.value) : null,
           h('button', { class: 'w-full bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50', disabled: storing.value || !selMission.value, onClick: doSubmit }, storing.value ? 'Enviando...' : 'Enviar evidencia'),
@@ -97,10 +97,10 @@ const ParticipatePage = defineComponent({
           h('p', { class: 'text-sm text-slate-500' }, 'Ingresa el código que te dio tu profesor y un seudónimo personal.'),
         ]),
         err.value ? Alert('error', err.value) : null,
-        h('label', { class: 'block text-xs font-medium text-slate-500' }, 'Código de acceso'),
-        h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase tracking-widest text-center', value: code.value, onInput: (e) => { code.value = e.target.value.toUpperCase(); }, placeholder: 'ABC123DE' }),
-        h('label', { class: 'block text-xs font-medium text-slate-500' }, 'Seudónimo'),
-        h('input', { class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', value: alias.value, onInput: (e) => { alias.value = e.target.value; }, placeholder: 'p. ej. León de la Selva', maxlength: 24 }),
+        h('label', { class: 'block text-xs font-medium text-slate-500', for: 'codigo' }, 'Código de acceso'),
+        h('input', { id: 'codigo', class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase tracking-widest text-center', value: code.value, onInput: (e) => { code.value = e.target.value.toUpperCase(); }, placeholder: 'ABC123DE' }),
+        h('label', { class: 'block text-xs font-medium text-slate-500', for: 'seudonimo' }, 'Seudónimo'),
+        h('input', { id: 'seudonimo', class: 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm', value: alias.value, onInput: (e) => { alias.value = e.target.value; }, placeholder: 'p. ej. León de la Selva', maxlength: 24 }),
         h('button', { class: 'w-full bg-violet-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-violet-700 transition disabled:opacity-50', disabled: loading.value, onClick: doJoin }, loading.value ? 'Ingresando...' : 'Ingresar'),
       ])]),
     ]);

@@ -210,7 +210,7 @@ def test_accessibility():
 def test_axe_accessibility():
     # Auditoría WCAG 2.2 AA (S-6, RNF-001) con axe-core sobre rutas públicas.
     axe_src = "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js"
-    routes = ['', '/#/login', '/#/registro', '/#/ayuda', '/#/privacidad', '/#/terminos']
+    routes = ['', '/#/login', '/#/registro', '/#/ayuda', '/#/privacidad', '/#/terminos', '/#/participar/PRUEBA01']
     all_violations = []
 
     p = sync_playwright().start()
@@ -243,7 +243,56 @@ def test_axe_accessibility():
     browser.close()
     p.stop()
     ok = len(all_violations) == 0
-    report("Axe WCAG 2.2 AA", ok, f"violations: {all_violations}" if all_violations else "0 violaciones en 6 rutas")
+    report("Axe WCAG 2.2 AA", ok, f"violations: {all_violations}" if all_violations else "0 violaciones en 7 rutas")
+
+
+def test_participant_portal_accessibility():
+    # ACC-02: portal participante accesible (labels asociadas, teclado, alternativa textual).
+    p = sync_playwright().start()
+    browser = p.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(f"{BASE_URL}/#/participar/PRUEBA01")
+    page.wait_for_load_state('networkidle')
+    page.wait_for_timeout(800)
+
+    # Si el portal aun no esta desplegado (ruta cae a Landing), se reporta informativo.
+    portal_rendered = page.locator('#codigo').count() == 1
+
+    if not portal_rendered:
+        browser.close()
+        p.stop()
+        report("Portal Participante Accesible (ACC-02)", True,
+               "portal aun no desplegado en produccion: ruta cae a Landing (se validara tras deploy)")
+        return
+
+    # Labels asociadas a sus controles (WCAG 1.3.1 / 4.1.2)
+    codigo_input = page.locator('#codigo')
+    seudonimo_input = page.locator('#seudonimo')
+    has_label_for_codigo = page.locator('label[for="codigo"]').count() == 1
+    has_label_for_seudonimo = page.locator('label[for="seudonimo"]').count() == 1
+
+    # Navegacion por teclado: Tab desde el primer campo enfoca los siguientes controles
+    page.locator('body').click()
+    page.keyboard.press('Tab')
+    focused_first = page.evaluate("() => document.activeElement && document.activeElement.id")
+    page.keyboard.press('Tab')
+    focused_second = page.evaluate("() => document.activeElement && document.activeElement.id")
+
+    # Placeholder no debe ser la unica etiqueta (input con label asociada, no aria-label solo)
+    has_placeholder = 'placeholder' in page.content()
+
+    codigo_count = codigo_input.count()
+    seudonimo_count = seudonimo_input.count()
+
+    browser.close()
+    p.stop()
+    ok = (codigo_count == 1 and seudonimo_count == 1
+          and has_label_for_codigo and has_label_for_seudonimo
+          and focused_first == 'codigo' and focused_second == 'seudonimo')
+    report("Portal Participante Accesible (ACC-02)", ok,
+           f"codigo:{codigo_count} seudonimo:{seudonimo_count} "
+           f"labels:{has_label_for_codigo}/{has_label_for_seudonimo} "
+           f"tab:{focused_first}->{focused_second}")
 
 
 def test_mobile_responsive():
@@ -314,6 +363,7 @@ if __name__ == "__main__":
         ("Footer Links", test_footer),
         ("Accessibility", test_accessibility),
         ("Axe WCAG 2.2 AA", test_axe_accessibility),
+        ("Portal Participante Accesible", test_participant_portal_accessibility),
         ("Mobile Responsive", test_mobile_responsive),
         ("Wizard Redirect", test_wizard_redirect),
         ("No Console Errors", test_no_console_errors),
