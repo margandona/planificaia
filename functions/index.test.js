@@ -1801,3 +1801,92 @@ describe('U13 - Seguridad, privacidad y costos', () => {
     expect(GAMIFICATION_RATE_LIMITS['gamify_evidence_review'].max).toBe(200);
   });
 });
+
+describe('U15 - QA integral (regresión completa)', () => {
+  const planning = {
+    type: 'class', level: '5-basico', subject: 'ciencias-naturales', duration: 90,
+    purpose: 'Los estudiantes comprenden el concepto central',
+    learningObjectives: [{ code: 'OA1', text: 'Comprender el concepto' }],
+    activities: [
+      { moment: 'inicio', duration: 15, description: 'Activan conocimientos previos' },
+      { moment: 'desarrollo', duration: 50, description: 'Trabajan en equipos' },
+      { moment: 'cierre', duration: 25, description: 'Comparten sus respuestas' },
+    ],
+    assessment: { type: 'formativa', criteria: ['Identifica el concepto'], feedbackStrategy: 'Oral' },
+  };
+
+  test('flujo integrado: planificación → experiencia → validación → publicación → progreso', () => {
+    const experience = normalizeGamifiedExperience({
+      title: 'Aventura científica', authorUid: 'u1',
+      description: 'Secuencia para investigar un fenómeno científico.',
+      purpose: 'Comprender el método científico.',
+      evidenceCriteria: ['Explica un experimento.'],
+      skills: ['pensamiento crítico'],
+      sourcePlanningVersionId: 'v1',
+      missions: [{ id: 'm1', title: 'Explorar', instructions: 'Realiza una observación.', type: 'individual', points: 10 }],
+    });
+    expect(experience.title).toBe('Aventura científica');
+    expect(experience.status).toBe('draft');
+
+    const review = validateGamifiedExperience(experience);
+    expect(review.valid).toBe(true);
+
+    const gate = canPublishExperience({ ...experience, status: 'published', code: 'ABC123DE', shortCode: 'X', url: 'u', qrUrl: 'q', publishedAt: '2026-08-11' });
+    expect(gate.ok).toBe(true);
+
+    const participant = buildParticipantDocument('León', 'exp1', 'individual', 'tok1');
+    expect(participant.alias).toBe('León');
+    expect(participant.status).toBe('active');
+    const progress = calculateExperienceProgress([{ ...participant, progress: { ...participant.progress, missionsCompleted: ['m1'], points: 10 } }], experience.missions || []);
+    expect(progress.totalParticipants).toBe(1);
+    expect(progress.totalPoints).toBe(10);
+  });
+
+  test('rate limit: la ventana cambia por día y el bucket es estable dentro del mismo día', () => {
+    const a = buildRateLimitDecision('join:ABC', 'gamify_join', new Date('2026-08-11T23:59:00Z'));
+    const b = buildRateLimitDecision('join:ABC', 'gamify_join', new Date('2026-08-12T00:01:00Z'));
+    expect(a.key).not.toBe(b.key);
+    expect(a.day).toBe('2026-08-11');
+    expect(b.day).toBe('2026-08-12');
+    expect(evaluateRateLimit(100, GAMIFICATION_RATE_LIMITS['gamify_join'].max).allowed).toBe(false);
+    expect(evaluateRateLimit(99, GAMIFICATION_RATE_LIMITS['gamify_join'].max).allowed).toBe(true);
+  });
+
+  test('awardInternalBadge: uniqueKey es estable por experiencia+participante+badge (idempotencia)', () => {
+    const exp = 'exp1';
+    const tok = 'tok1';
+    const badge = 'PRIMERA_MISION';
+    const k1 = `${exp}::${tok}::${badge}`;
+    expect(k1).toBe('exp1::tok1::PRIMERA_MISION');
+    const k2 = `${exp}::${tok}::${badge}`;
+    expect(k1).toBe(k2);
+  });
+
+  test('sync selectivo nunca sobrescribe campos no pedidos (regresión U12)', () => {
+    const experience = { oa: [], purpose: 'viejo', evidenceCriteria: ['viejo'], narrative: 'Narrativa del docente' };
+    const { update } = applySelectiveSync(experience, { oa: [{ code: 'OA2' }], purpose: 'nuevo', evidenceCriteria: ['nuevo'] }, ['oa']);
+    expect(update).toHaveProperty('oa');
+    expect(update).not.toHaveProperty('purpose');
+    expect(update).not.toHaveProperty('evidenceCriteria');
+    expect(experience.narrative).toBe('Narrativa del docente');
+  });
+
+  test('recomendación metodológica no regresa con el catálogo ampliado (regresión U4)', () => {
+    const { recommendations, flagEnabled } = recommendMethodologies({ type: 'unit', level: '7-basico', numClasses: 6, duration: 90 }, { methodologyRecommendationsEnabled: true });
+    expect(flagEnabled).toBe(true);
+    expect(Array.isArray(recommendations)).toBe(true);
+    for (const r of recommendations) {
+      expect(['PVISIBLE', 'MIXTA']).not.toContain(r.method);
+    }
+  });
+
+  test('variante A offline siempre disponible para actividades sin tecnología (regresión U5)', () => {
+    const variants = [
+      { id: 'A', description: 'Sin tecnología', instructions: 'Usa materiales disponibles.', requiredResources: [], multimedia: false },
+      { id: 'B', description: 'Con tablets', instructions: 'Usa tablets.', requiredResources: ['tablets'], multimedia: true },
+    ];
+    const res = filterActivityVariantsByResources(variants, []);
+    expect(res.map(v => v.id)).toContain('A');
+    expect(res.map(v => v.id)).not.toContain('B');
+  });
+});

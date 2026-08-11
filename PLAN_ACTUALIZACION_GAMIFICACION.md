@@ -1169,6 +1169,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U15 — QA integral
 - Regresión completa (existente + nuevo); dataset de evaluación ampliado.
 
+**Cierre (2026-08-11):** QA integral implementado (QA-01/QA-02, sección 46). Dataset de evaluación ampliado a **60 casos** (55 + 5 nuevos) con la categoría `gamificacion-prompts` (planificación gamificable, gamificación incoherente, prompt de infografía, recorrido interactivo, barrera motora en gamificación); `eval-batch.mjs` corre limpio con **global 4.89, 100% aprueba**, inyección 3/3 y PII 2/2. Tests unit de regresión (QA-02): 6 nuevos en `index.test.js` — flujo integrado planificación→experiencia→validación→publicación→progreso, rate limit con cambio de ventana diaria, idempotencia `uniqueKey` de `awardInternalBadge`, sync selectivo sin sobrescritura (regresión U12), recomendación sin PVISIBLE/MIXTA (regresión U4) y variante A offline sin recursos (regresión U5). Verificación sin `v-html`/`innerHTML` (XSS sección 42). **Unit 188/188**, E2E 13/13, integración con emulador autocontenida (`integration.test.js`), batch 60 casos. Pendiente para CI/E2E real: validación del portal participante tras deploy (U8/U14).
+
 ### Fase U16 — Piloto
 - Docentes reales, experiencias de aula, feedback (`submitFeedback` existente).
 

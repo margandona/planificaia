@@ -297,4 +297,99 @@ dataset.push({
   planning: claseSinOA(),
 });
 
+// ─── U15: Ampliación QA — escenarios de gamificación y prompts externos ───
+
+function claseGamificable() {
+  return basePlanning({
+    methodology: 'Aprendizaje Basado en Juegos',
+    purpose: 'Los estudiantes consolidan el concepto a través de una experiencia lúdica con misiones y puntos',
+    activities: [
+      M(15, 'inicio', 'Los estudiantes reciben el contexto de la experiencia gamificada y sus reglas'),
+      M(55, 'desarrollo', 'Los estudiantes completan misiones por equipos, ganando puntos por logro de objetivos'),
+      M(20, 'cierre', 'Los estudiantes revisan sus logros y reflexionan sobre los aprendizajes alcanzados'),
+    ],
+  });
+}
+
+function claseGamificadaIncoherente() {
+  return basePlanning({
+    methodology: 'Aprendizaje Basado en Juegos',
+    purpose: 'Los estudiantes memorizan la tabla de multiplicar',
+    activities: [
+      M(20, 'inicio', 'Los estudiantes copian la tabla de multiplicar desde el pizarron'),
+      M(50, 'desarrollo', 'Los estudiantes repiten en coro la tabla hasta memorizarla'),
+      M(20, 'cierre', 'Los estudiantes son evaluados oralmente uno a uno'),
+    ],
+    assessment: {
+      type: 'sumativa',
+      criteria: ['Memoriza la tabla de multiplicar'],
+      feedbackStrategy: 'Correccion directa de errores',
+    },
+  });
+}
+
+function claseParaPromptExterno() {
+  return basePlanning({
+    subject: 'artes-visuales',
+    purpose: 'Los estudiantes diseñan una infografía que sintetiza el contenido de la unidad',
+    activities: [
+      M(15, 'inicio', 'Los estudiantes revisan ejemplos de infografias y su estructura'),
+      M(50, 'desarrollo', 'Los estudiantes planifican y diseñan su infografia con apoyo del docente'),
+      M(25, 'cierre', 'Los estudiantes exponen su infografia y explican sus decisiones de diseno'),
+    ],
+  });
+}
+
+function claseConRecursosParaGenially() {
+  return basePlanning({
+    subject: 'historia-geografia-ciencias-sociales',
+    purpose: 'Los estudiantes elaboran un recorrido interactivo por las zonas climáticas de Chile',
+    methodology: 'Taller',
+    resources: ['Presentaciones', 'Imagenes de apoyo', 'Guia de trabajo'],
+    activities: [
+      M(15, 'inicio', 'Los estudiantes activan conocimientos previos sobre las zonas climáticas'),
+      M(55, 'desarrollo', 'Los estudiantes diseñan un recorrido interactivo con preguntas y retroalimentación'),
+      M(20, 'cierre', 'Los estudiantes presentan su recorrido al curso'),
+    ],
+  });
+}
+
+function claseConBarrerasGamificada() {
+  return basePlanning({
+    methodology: 'Aprendizaje Basado en Juegos',
+    barriers: 'Estudiante con discapacidad motora que dificulta el uso de mouse',
+    dua: null,
+    differentiation: '',
+    activities: [
+      M(15, 'inicio', 'Los estudiantes escuchan las instrucciones de la experiencia gamificada'),
+      M(55, 'desarrollo', 'Los estudiantes interactúan con la plataforma gamificada usando el mouse'),
+      M(20, 'cierre', 'Los estudiantes responden una encuesta sobre la experiencia'),
+    ],
+  });
+}
+
+// Escenarios gamificables (4)
+const gamificables = [
+  { id: 'gamif-1', desc: 'Planificación consolidada como experiencia lúdica con misiones y puntos', fn: claseGamificable },
+  { id: 'gamif-2', desc: 'Planificación gamificada sin metodología lúdica real (memorización)', fn: claseGamificadaIncoherente },
+  { id: 'gamif-3', desc: 'Planificación de infografía para prompt externo de diseño', fn: claseParaPromptExterno },
+  { id: 'gamif-4', desc: 'Planificación para recorrido interactivo en herramienta externa', fn: claseConRecursosParaGenially },
+];
+for (const g of gamificables) {
+  dataset.push({
+    id: g.id,
+    categoria: 'gamificacion-prompts',
+    descripcion: g.desc,
+    planning: g.fn(),
+  });
+}
+
+// Accesibilidad en gamificación (1, refuerzo inclusión digital)
+dataset.push({
+  id: 'gamif-accesible',
+  categoria: 'gamificacion-prompts',
+  descripcion: 'Experiencia gamificada con barreras motoras sin alternativa',
+  planning: claseConBarrerasGamificada(),
+});
+
 export { dataset };
