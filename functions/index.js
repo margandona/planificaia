@@ -88,6 +88,7 @@ import {
   buildEvidenceRecord,
   applyEvidenceApproval,
   buildTeacherFeedback,
+  normalizeFeedbackModule,
   buildExperienceSharePayload,
   canPublishExperience,
   calculateExperienceProgress,
@@ -1886,7 +1887,7 @@ export const submitFeedback = onCall(
   async (request) => {
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
 
-    const { planningId, rating, quality, pedagogic, ease, comments } = request.data || {};
+    const { planningId, rating, quality, pedagogic, ease, comments, module } = request.data || {};
     const userId = request.auth.uid;
 
     if (planningId) {
@@ -1903,6 +1904,7 @@ export const submitFeedback = onCall(
     await db.collection('feedback').add({
       userId,
       planningId: planningId || null,
+      module: normalizeFeedbackModule(module),
       rating: toScore(rating),
       quality: toScore(quality),
       pedagogic: toScore(pedagogic),

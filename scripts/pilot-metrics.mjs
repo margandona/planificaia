@@ -128,5 +128,53 @@ if (!fbSnap.empty) {
   }
 }
 
+// 7. Adopción de módulos nuevos (U6-U13): gamificación y prompts externos
+const gamSnap = await db.collection('gamified-experiences').get();
+let gamCount = 0; const gamByStatus = {};
+for (const d of gamSnap.docs) {
+  const g = d.data();
+  if (g.createdAt && new Date(g.createdAt) < since) continue;
+  gamCount++;
+  gamByStatus[g.status || 'draft'] = (gamByStatus[g.status || 'draft'] || 0) + 1;
+}
+let gamParticipants = 0;
+try {
+  const partsSnap = await db.collectionGroup('participants').get();
+  for (const d of partsSnap.docs) {
+    const p = d.data();
+    if (p.joinedAt && new Date(p.joinedAt) < since) continue;
+    if (p.status === 'active') gamParticipants++;
+  }
+} catch (e) { /* collectionGroup sin índice: se reporta 0 */ }
+let gamEvidences = 0;
+try {
+  const evSnap = await db.collectionGroup('evidence').get();
+  gamEvidences = evSnap.docs.length;
+} catch (e) { /* collectionGroup sin índice */ }
+const badgeSnap = await db.collection('badge-awards').get();
+let gamBadges = 0;
+for (const d of badgeSnap.docs) {
+  const b = d.data();
+  if (b.earnedAt && new Date(b.earnedAt) < since) continue;
+  gamBadges++;
+}
+console.log('\n7) ADOPCIÓN MÓDULOS NUEVOS (U6-U13)');
+console.log(`   Experiencias gamificadas: ${gamCount}`);
+for (const [k, v] of Object.entries(gamByStatus)) console.log(`     ${k}: ${v}`);
+console.log(`   Participantes activos (collectionGroup): ${gamParticipants}`);
+console.log(`   Evidencias enviadas (collectionGroup): ${gamEvidences}`);
+console.log(`   Insignias otorgadas: ${gamBadges}`);
+
+const extSnap = await db.collection('external-prompts').get();
+let extCount = 0; const extByTool = {};
+for (const d of extSnap.docs) {
+  const e = d.data();
+  if (e.createdAt && new Date(e.createdAt) < since) continue;
+  extCount++;
+  extByTool[e.tool || 'generic'] = (extByTool[e.tool || 'generic'] || 0) + 1;
+}
+console.log(`   Prompts externos generados: ${extCount}`);
+for (const [k, v] of Object.entries(extByTool)) console.log(`     ${k}: ${v}`);
+
 console.log('\n===========================================\n');
 process.exit(0);

@@ -51,6 +51,15 @@ const GamificacionesPage = defineComponent({
       }
     };
 
+    // U16: feedback ligero del piloto por módulo (adopción de gamificación).
+    const fbUseful = ref(false);
+    const sendUseful = async () => {
+      try {
+        await submitFeedbackFn({ module: 'gamificacion', quality: 5, pedagogic: 5, ease: 4, rating: 4, comments: 'El módulo de gamificación me resultó útil en el piloto.' });
+        fbUseful.value = true;
+      } catch (e) { /* best-effort */ }
+    };
+
     const doReview = async (exp, ev, approve) => {
       reviewBusy[evKey(exp.id, ev.participantToken, ev.evidenceId, ev.status)] = true;
       reviewOk[exp.id] = ''; reviewErr[exp.id] = '';
@@ -212,10 +221,10 @@ const GamificacionesPage = defineComponent({
     };
 
     onMounted(loadExperiences);
-    return { loading, experiences, plannings, err, ok, creating, showCreate, createSelected, draftGen, regenSel, regenBusy, regenOk, regenErr, statusBadge, summary, loadExperiences, createExperience, generateDraft, regenSection };
+    return { loading, experiences, plannings, err, ok, creating, showCreate, createSelected, draftGen, regenSel, regenBusy, regenOk, regenErr, statusBadge, summary, loadExperiences, createExperience, generateDraft, regenSection, fbUseful, sendUseful };
   },
   render() {
-    const { loading, experiences, plannings, err, ok, creating, showCreate, createSelected, draftGen, regenSel, regenBusy, regenOk, regenErr, statusBadge, summary, loadExperiences, createExperience, generateDraft, regenSection } = this;
+    const { loading, experiences, plannings, err, ok, creating, showCreate, createSelected, draftGen, regenSel, regenBusy, regenOk, regenErr, statusBadge, summary, loadExperiences, createExperience, generateDraft, regenSection, fbUseful, sendUseful } = this;
     const sourceTypeLabel = { planning: 'Planificación completa', activity: 'Actividad', class: 'Clase', unit: 'Unidad', assessment: 'Evaluación' };
     const regenSections = ['narrative', 'missions', 'rules', 'evidenceCriteria', 'description'];
 
@@ -225,7 +234,12 @@ const GamificacionesPage = defineComponent({
 
       h('div', { class: 'flex items-center justify-between mb-4' }, [
         h('h2', { class: 'text-lg font-semibold text-slate-800' }, 'Tus experiencias'),
-        h('button', { class: 'bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition', onClick: () => { showCreate.value = !showCreate.value; } }, showCreate.value ? 'Cancelar' : 'Convertir planificación'),
+        h('div', { class: 'flex items-center gap-2' }, [
+          fbUseful.value
+            ? h('span', { class: 'text-xs text-green-600' }, 'Gracias por tu feedback')
+            : h('button', { type: 'button', class: 'text-xs text-emerald-600 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition', onClick: sendUseful }, 'Me fue útil'),
+          h('button', { class: 'bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 transition', onClick: () => { showCreate.value = !showCreate.value; } }, showCreate.value ? 'Cancelar' : 'Convertir planificación'),
+        ]),
       ]),
 
       showCreate.value ? Card([h('div', { class: 'p-5 space-y-4' }, [

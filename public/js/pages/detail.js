@@ -394,7 +394,7 @@ const FeedbackForm = defineComponent({
       if (!quality.value) { fbError.value = 'Evalúa la calidad primero (1-5)'; return; }
       submitting.value = true; fbError.value = '';
       try {
-        await submitFeedbackFn({ planningId: props.planningId, quality: quality.value, pedagogic: pedagogic.value, ease: ease.value, comments: comments.value });
+        await submitFeedbackFn({ planningId: props.planningId, module: 'planificacion', quality: quality.value, pedagogic: pedagogic.value, ease: ease.value, comments: comments.value });
         sent.value = true;
       } catch (e) { fbError.value = 'Error al enviar feedback'; }
       finally { submitting.value = false; }

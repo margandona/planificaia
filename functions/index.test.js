@@ -112,6 +112,8 @@ import {
   buildEvidenceRecord,
   applyEvidenceApproval,
   buildTeacherFeedback,
+  normalizeFeedbackModule,
+  FEEDBACK_MODULES,
   buildExperienceSharePayload,
   canPublishExperience,
   calculateExperienceProgress,
@@ -1888,5 +1890,28 @@ describe('U15 - QA integral (regresión completa)', () => {
     const res = filterActivityVariantsByResources(variants, []);
     expect(res.map(v => v.id)).toContain('A');
     expect(res.map(v => v.id)).not.toContain('B');
+  });
+});
+
+describe('U16 - Piloto (métricas y feedback por módulo)', () => {
+  test('FEEDBACK_MODULES expone la whitelist cerrada de módulos', () => {
+    expect(FEEDBACK_MODULES).toEqual(['planificacion', 'gamificacion', 'prompts', 'general']);
+  });
+
+  test('normalizeFeedbackModule acepta módulos válidos y degrada a general', () => {
+    expect(normalizeFeedbackModule('gamificacion')).toBe('gamificacion');
+    expect(normalizeFeedbackModule('PROMPTS')).toBe('prompts');
+    expect(normalizeFeedbackModule('planificacion')).toBe('planificacion');
+    expect(normalizeFeedbackModule('otro-módulo')).toBe('general');
+    expect(normalizeFeedbackModule('')).toBe('general');
+    expect(normalizeFeedbackModule(undefined)).toBe('general');
+  });
+
+  test('el feedback docente conserva tipo, texto sanitizado y límite', () => {
+    const fb = buildTeacherFeedback('exp-1', 'tok-1', 'm2', 'Muy bien <b>trabajo</b> ' + 'x'.repeat(3000));
+    expect(fb.type).toBe('teacher');
+    expect(fb.text).not.toContain('<b>');
+    expect(fb.text.length).toBeLessThanOrEqual(2000);
+    expect(fb.missionId).toBe('m2');
   });
 });

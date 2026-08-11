@@ -2351,6 +2351,17 @@ export function buildTeacherFeedback(experienceId, participantToken, missionId, 
   };
 }
 
+// ===== U16: Piloto — feedback con módulo de origen =====
+// El piloto docente (Fase 17 del master plan) recoge feedback por módulo para
+// medir adopción (sección 49). Whitelist cerrada: planificacion | gamificacion |
+// prompts | general. Función pura testeable.
+export const FEEDBACK_MODULES = ['planificacion', 'gamificacion', 'prompts', 'general'];
+
+export function normalizeFeedbackModule(module) {
+  const m = String(module || 'general').trim().toLowerCase();
+  return FEEDBACK_MODULES.includes(m) ? m : 'general';
+}
+
 // ===== U10: Publicación y analítica básica =====
 // Sección 45.6: publish valida la experiencia (sin críticos) y genera enlace +
 // código + URL pública; shortCode revocable (39). Sin IA.

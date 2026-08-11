@@ -1174,6 +1174,8 @@ Para cada fase: objetivo, alcance, archivos/colecciones/funciones/interfaces afe
 ### Fase U16 — Piloto
 - Docentes reales, experiencias de aula, feedback (`submitFeedback` existente).
 
+**Cierre (2026-08-11):** infraestructura de piloto preparada (ejecución con docentes reales queda pendiente de gestión, DEPL-02). `submitFeedback` ampliado con `module` (whitelist `FEEDBACK_MODULES` = planificacion | gamificacion | prompts | general, `normalizeFeedbackModule` puro en `logic.js`) para medir adopción por módulo (sección 49); `detail.js` envía `module:'planificacion'`, y las páginas nuevas envían feedback ligero "Me fue útil": `gamificaciones.js` (`module:'gamificacion'`) y `externos.js` (`module:'prompts'`). `scripts/pilot-metrics.mjs` ampliado con la sección 7 "Adopción módulos nuevos (U6-U13)": experiencias gamificadas por estado, participantes activos/evidencias (collectionGroup con try/catch por índice), insignias otorgadas y prompts externos por herramienta. 3 tests nuevos en `index.test.js` (whitelist de módulos, normalización, límite/sanitización del feedback docente). **Unit 191/191**, E2E 13/13. Pendiente: ejecución del piloto con docentes reales (U16 operativo) y métricas de la sección 49.
+
 ### Fase U17 — Despliegue gradual
 - Feature flags, pilotos, porcentaje, rollback.
 

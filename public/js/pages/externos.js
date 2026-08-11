@@ -92,6 +92,15 @@ const ExternalPromptsPage = defineComponent({
       }
     };
 
+    // U16: feedback ligero del piloto por módulo (adopción de prompts).
+    const fbUseful = ref(false);
+    const sendUseful = async () => {
+      try {
+        await submitFeedbackFn({ module: 'prompts', quality: 5, pedagogic: 5, ease: 4, rating: 4, comments: 'El generador de prompts me resultó útil en el piloto.' });
+        fbUseful.value = true;
+      } catch (e) { /* best-effort */ }
+    };
+
     onMounted(loadPlannings);
 
     return () => h(Layout, { title: 'Prompts externos' }, () => [
@@ -124,6 +133,9 @@ const ExternalPromptsPage = defineComponent({
             h('button', { class: 'text-xs text-violet-600 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition', disabled: exportBusy.value, onClick: () => exportPkg('text') }, exportBusy.value ? 'Exportando...' : 'Exportar texto'),
             h('button', { class: 'text-xs text-violet-600 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition', disabled: exportBusy.value, onClick: () => exportPkg('markdown') }, 'Exportar Markdown'),
             h('button', { class: 'text-xs text-violet-600 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-50 transition', disabled: exportBusy.value, onClick: () => exportPkg('json') }, 'Exportar JSON'),
+            fbUseful.value
+              ? h('span', { class: 'text-xs text-green-600' }, 'Gracias por tu feedback')
+              : h('button', { type: 'button', class: 'text-xs text-emerald-600 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition', onClick: sendUseful }, 'Me fue útil'),
           ]),
           h('div', { class: 'bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap' }, result.value.package?.prompt || ''),
           (result.value.package?.checklist || []).length > 0 ? h('div', { class: 'bg-amber-50 rounded-lg p-3' }, [
