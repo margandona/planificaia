@@ -56,6 +56,7 @@ import {
   recommendMethodologies as recommendMethodologiesEngine,
   resolveFeatureFlags,
   resolveUserFeatureFlags,
+  normalizeFlagUpdate,
   retentionCutoffIso,
   runPedagogicalAudit,
   sanitizeContextFields,
@@ -436,10 +437,10 @@ let featureFlagsCache = null;
 let featureFlagsCachedAt = 0;
 const FEATURE_FLAGS_CACHE_MS = 5 * 60 * 1000;
 
-async function getFeatureFlags(uid = '') {
+async function getFeatureFlags(uid = '', isAdmin = false) {
   const now = Date.now();
   if (featureFlagsCache && now - featureFlagsCachedAt < FEATURE_FLAGS_CACHE_MS) {
-    return resolveUserFeatureFlags(featureFlagsCache, uid);
+    return resolveUserFeatureFlags(featureFlagsCache, uid, isAdmin);
   }
   let docData = {};
   try {
@@ -457,7 +458,7 @@ async function getFeatureFlags(uid = '') {
   }
   featureFlagsCache = docData;
   featureFlagsCachedAt = now;
-  return resolveUserFeatureFlags(docData, uid);
+  return resolveUserFeatureFlags(docData, uid, isAdmin);
 }
 
 // ─── CLOUD FUNCTIONS ────────────────────────────────────
@@ -600,7 +601,7 @@ async function runGeneratePlanning(request) {
 
     // 5a. U3: contexto ampliado opcional (campos del paso 3 del wizard).
     // Con las flags apagadas la extensión queda vacía y el comportamiento actual no cambia.
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     const { extension, errors } = normalizeContextExtension(sanitizedContext, flags);
     if (errors.length > 0) {
       await db.collection('audit-logs').add({
@@ -830,7 +831,7 @@ export const recommendMethodologies = onCall(
     const { context, oaIds, planningId } = request.data || {};
 
     // Flag: sin methodologyRecommendationsEnabled la función está desactivada.
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.methodologyRecommendationsEnabled) {
       throw new Error('FLAG_DESACTIVADO');
     }
@@ -967,7 +968,7 @@ export const generateActivityVariants = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, activityId, resources } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.methodologyRecommendationsEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!planningId || activityId === undefined || activityId === null) throw new Error('CONTEXTO_INCOMPLETO');
 
@@ -1049,7 +1050,7 @@ export const createGamifiedExperience = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, sourceRef, modes, intensity } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!planningId || !sourceRef || typeof sourceRef !== 'object') throw new Error('FUENTE_NO_ENCONTRADA');
     if (modes && !Array.isArray(modes)) throw new Error('MODO_INVALIDO');
@@ -1149,7 +1150,7 @@ export const generateGamificationDraft = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1220,7 +1221,7 @@ export const regenerateGamificationSection = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId, section, instruction } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId || !section || !isRegenerableGamificationSection(section)) throw new Error('SECCION_INVALIDA');
 
@@ -1437,7 +1438,7 @@ export const publishGamifiedExperience = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1477,7 +1478,7 @@ export const unpublishGamifiedExperience = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1504,7 +1505,7 @@ export const archiveGamifiedExperience = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1531,7 +1532,7 @@ export const computeExperienceProgress = onCall(
     if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
 
@@ -1589,7 +1590,7 @@ export const generateExternalToolPrompt = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { planningId, tool, resourceType, context } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.externalPromptGeneratorEnabled) throw new Error('FLAG_DESACTIVADO');
 
     const profile = resolveExternalToolProfile(tool);
@@ -1676,7 +1677,7 @@ export const syncPlanningContext = onCall(
     await runRetentionSweep();
     const userId = request.auth.uid;
     const { experienceId } = request.data || {};
-    const flags = await getFeatureFlags(userId);
+    const flags = await getFeatureFlags(userId, request.auth.token?.admin === true);
     if (!flags.gamificationModuleEnabled) throw new Error('FLAG_DESACTIVADO');
     if (!experienceId) throw new Error('EXPERIENCIA_NO_ENCONTRADA');
     await enforceRateLimit(`pub:${userId}`, 'gamify_publish');
@@ -1987,6 +1988,31 @@ export const setUserPlan = onCall(
       userId: request.auth.uid, action: 'set-plan', resource: 'user', resourceId: targetUid, plan, createdAt: now,
     });
     return { success: true, plan };
+  }
+);
+
+// U17b: panel de control de feature flags (config/feature-flags). Solo admin.
+// Escribe el doc completo de flags con validación (claves conocidas, rollout
+// 0-100, allowlist de uids); el admin SIEMPRE ve todo activado (bypass en
+// resolveUserFeatureFlags), esto controla lo que ve el resto de usuarios.
+export const updateFeatureFlags = onCall(
+  { cors: ['https://planificacion-con-ia.web.app'] },
+  async (request) => {
+    if (!request.auth) throw new Error('REQUIERE_AUTENTICACION');
+    if (request.auth.token.admin !== true) throw new Error('ACCESO_NO_AUTORIZADO');
+    const { errors, data } = normalizeFlagUpdate(request.data || {});
+    if (errors.length > 0) throw new Error('DATOS_INVALIDOS: ' + errors.join(', '));
+    if (Object.keys(data).length === 0) throw new Error('DATOS_INVALIDOS');
+    const now = new Date().toISOString();
+    data.updatedAt = now;
+    await db.collection('config').doc('feature-flags').set(data, { merge: true });
+    // Invalida la caché en memoria para que el cambio sea visible sin esperar 5 min.
+    featureFlagsCache = null;
+    featureFlagsCachedAt = 0;
+    await db.collection('audit-logs').add({
+      userId: request.auth.uid, action: 'update-feature-flags', resource: 'config', resourceId: 'feature-flags', flags: data, createdAt: now,
+    });
+    return { success: true, data };
   }
 );
 

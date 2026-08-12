@@ -620,12 +620,16 @@ export function userFlagBucket(uid = '') {
 //   - rollout: { <flag>: 0-100 } → porcentaje de usuarios con bucket < pct.
 //   - allowlist: { <flag>: [uid, ...] } → pilotos siempre ON (mientras la flag
 //     global esté en true).
-export function resolveUserFeatureFlags(source = {}, uid = '') {
+// U17b: isAdmin (custom claim admin == true) SIEMPRE ve todo activado, incluso
+// con la flag global apagada, para que el admin pueda probar/verificar antes de
+// abrir a otros; el panel institucional controla qué ven el resto.
+export function resolveUserFeatureFlags(source = {}, uid = '', isAdmin = false) {
   const globalFlags = resolveFeatureFlags(source);
   const rollout = source.rollout && typeof source.rollout === 'object' ? source.rollout : {};
   const allowlist = source.allowlist && typeof source.allowlist === 'object' ? source.allowlist : {};
   const out = {};
   for (const key of Object.keys(globalFlags)) {
+    if (isAdmin) { out[key] = true; continue; }
     if (globalFlags[key] !== true) { out[key] = false; continue; }
     const allowed = Array.isArray(allowlist[key]) ? allowlist[key].map(String) : [];
     if (uid && allowed.includes(String(uid))) { out[key] = true; continue; }
@@ -637,6 +641,35 @@ export function resolveUserFeatureFlags(source = {}, uid = '') {
     }
   }
   return out;
+}
+
+// U17b: normaliza el payload de admin para config/feature-flags. Solo admite
+// las claves de FEATURE_FLAGS con valor booleano, rollout 0-100 entero y
+// allowlist de uids (array o string separada por comas). Devuelve { errors, data }.
+export function normalizeFlagUpdate(input = {}) {
+  const errors = [];
+  const data = {};
+  const rollout = {};
+  const allowlist = {};
+  for (const key of Object.keys(FEATURE_FLAGS)) {
+    if (typeof input[key] === 'boolean') data[key] = input[key];
+  }
+  const rawRollout = input.rollout && typeof input.rollout === 'object' ? input.rollout : {};
+  for (const key of Object.keys(rawRollout)) {
+    if (!(key in FEATURE_FLAGS)) { errors.push(`ROLLOUT_DESCONOCIDO:${key}`); continue; }
+    const pct = Number(rawRollout[key]);
+    if (!Number.isInteger(pct) || pct < 0 || pct > 100) { errors.push(`ROLLOUT_INVALIDO:${key}`); continue; }
+    rollout[key] = pct;
+  }
+  const rawAllow = input.allowlist && typeof input.allowlist === 'object' ? input.allowlist : {};
+  for (const key of Object.keys(rawAllow)) {
+    if (!(key in FEATURE_FLAGS)) { errors.push(`ALLOW_DESCONOCIDO:${key}`); continue; }
+    const list = Array.isArray(rawAllow[key]) ? rawAllow[key] : String(rawAllow[key] || '').split(',');
+    allowlist[key] = list.map(s => String(s).trim()).filter(Boolean);
+  }
+  if (Object.keys(rollout).length) data.rollout = rollout;
+  if (Object.keys(allowlist).length) data.allowlist = allowlist;
+  return { errors, data };
 }
 
 // Territorio: { region, comuna, zona, actividadesProductivas[], patrimonio,

@@ -16,7 +16,7 @@ const WizardPage = defineComponent({
     const loadFeatureFlags = async () => {
       try {
         const doc = await loadFeatureFlags();
-        featureFlags.value = resolveUserFeatureFlags(doc, store.user?.uid || '');
+        featureFlags.value = resolveUserFeatureFlags(doc, store.user?.uid || '', isAdmin());
       } catch (e) {
         featureFlags.value = { methodologyRecommendationsEnabled: false, gamificationModuleEnabled: false, externalPromptGeneratorEnabled: false, tpContextEnabled: false, localContextEnabled: false };
       }

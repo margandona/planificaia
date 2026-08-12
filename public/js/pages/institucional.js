@@ -1,4 +1,4 @@
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, isAdmin, isOrgAdmin } from '../core.js';
+import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged, getIdTokenResult, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp, DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, setUserPlanFn, setFeatureFlagsFn, loadFeatureFlags, clearFeatureFlagsCache, isAdmin, isOrgAdmin } from '../core.js';
 
 // Carga diferida (S-5.4): panel institucional e invitaciones.
 const InstitucionalPage = defineComponent({
@@ -24,6 +24,51 @@ const InstitucionalPage = defineComponent({
     const planSel = reactive({});
     const savingPlan = reactive({});
     const planChange = (uid, plan) => { planSel[uid] = plan; };
+
+    // U17b: panel de control de feature flags (solo admin global).
+    const FLAG_DESCRIPTIONS = {
+      methodologyRecommendationsEnabled: ['Recomendación metodológica', 'Paso 4 del asistente (IA + reglas deterministas)'],
+      gamificationModuleEnabled: ['Gamificación', 'Módulo de experiencias gamificadas + portal participante'],
+      externalPromptGeneratorEnabled: ['Generador de prompts externos', 'Página Prompts externos (Genially, Canva, Prezi)'],
+      tpContextEnabled: ['Contexto técnico-profesional', 'TP especialidades y asociaciones en el paso 3'],
+      localContextEnabled: ['Contexto territorial', 'Territorio y contexto local en el paso 3'],
+    };
+    const flagSettings = reactive({ on: {}, rollout: {} });
+    const flagsLoaded = ref(false);
+    const savingFlags = ref(false);
+
+    const loadFlags = async () => {
+      flagsLoaded.value = false; err.value = ''; ok.value = '';
+      try {
+        const doc = await loadFeatureFlags();
+        for (const key of Object.keys(FLAG_DESCRIPTIONS)) {
+          flagSettings.on[key] = doc[key] === true;
+          const pct = doc.rollout && typeof doc.rollout[key] === 'number' ? doc.rollout[key] : 100;
+          flagSettings.rollout[key] = pct;
+        }
+      } catch (e) {
+        err.value = 'No se pudieron cargar las funcionalidades.';
+      } finally { flagsLoaded.value = true; }
+    };
+
+    const saveFlags = async () => {
+      err.value = ''; ok.value = '';
+      const rollout = {};
+      for (const key of Object.keys(FLAG_DESCRIPTIONS)) {
+        const pct = Number(flagSettings.rollout[key]);
+        if (pct >= 0 && pct <= 100) rollout[key] = pct;
+      }
+      savingFlags.value = true;
+      try {
+        await setFeatureFlagsFn({ ...flagSettings.on, rollout });
+        clearFeatureFlagsCache();
+        ok.value = 'Funcionalidades actualizadas. Los cambios se aplican en los próximos minutos.';
+      } catch (e) {
+        const msg = { ACCESO_NO_AUTORIZADO: 'Solo un administrador puede cambiar las funcionalidades.', DATOS_INVALIDOS: 'Revisa los valores (porcentaje 0-100).' }[e.message] || e.message || 'No se pudieron actualizar las funcionalidades.';
+        err.value = msg;
+      } finally { savingFlags.value = false; }
+    };
+    onMounted(() => { if (isAdmin()) loadFlags(); });
 
     const savePlan = async (m) => {
       err.value = ''; ok.value = '';
@@ -123,6 +168,48 @@ const InstitucionalPage = defineComponent({
     return () => h(Layout, { title: 'Institucional' }, () => [
       err.value ? Alert('error', err.value) : null,
       ok.value ? Alert('success', ok.value) : null,
+
+      isAdmin() ? h('div', { class: 'mb-4' }, [
+        Card([h('div', { class: 'p-5 space-y-4' }, [
+          h('div', [
+            h('h2', { class: 'text-lg font-bold text-slate-900' }, 'Funcionalidades'),
+            h('p', { class: 'text-xs text-slate-400' }, 'Activa o desactiva las funciones nuevas y qué porcentaje de docentes las ve. Como admin siempre puedes usarlas, estén o no activadas.'),
+          ]),
+          ...Object.entries(FLAG_DESCRIPTIONS).map(([key, [name, desc]]) =>
+            h('div', { class: 'flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-slate-100 rounded-lg p-3' }, [
+              h('div', [
+                h('p', { class: 'text-sm font-medium text-slate-800' }, name),
+                h('p', { class: 'text-xs text-slate-400' }, desc),
+              ]),
+              h('div', { class: 'flex items-center gap-3 shrink-0' }, [
+                flagsLoaded.value ? h('label', { class: 'text-xs text-slate-500' }, `${flagSettings.rollout[key]}% de docentes`) : null,
+                h('input', {
+                  type: 'range', min: 0, max: 100, step: 5, value: flagSettings.rollout[key],
+                  disabled: !flagsLoaded.value || !flagSettings.on[key],
+                  'aria-label': `Porcentaje de docentes para ${name}`,
+                  onInput: (e) => flagSettings.rollout[key] = Number(e.target.value),
+                  class: 'w-28',
+                }),
+                h('button', {
+                  type: 'button', role: 'switch',
+                  'aria-checked': flagsLoaded.value && flagSettings.on[key],
+                  'aria-label': `${name}: ${(flagsLoaded.value && flagSettings.on[key]) ? 'activada' : 'desactivada'}`,
+                  onClick: () => flagSettings.on[key] = !flagSettings.on[key],
+                  class: `relative w-11 h-6 rounded-full transition-colors ${(flagsLoaded.value && flagSettings.on[key]) ? 'bg-green-500' : 'bg-slate-300'}`,
+                }, h('span', { class: `absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${(flagsLoaded.value && flagSettings.on[key]) ? 'translate-x-5' : ''}` })),
+              ]),
+            ])
+          ),
+          h('div', { class: 'flex gap-2 pt-1' }, [
+            h('button', {
+              onClick: saveFlags, disabled: savingFlags.value || !flagsLoaded.value,
+              class: 'bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition',
+            }, savingFlags.value ? 'Guardando...' : 'Guardar cambios'),
+            h('button', { onClick: loadFlags, disabled: savingFlags.value, class: 'text-sm px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition' }, 'Recargar'),
+          ]),
+        ])]),
+      ]) : null,
+
       loading.value ? h('div', { class: 'flex justify-center py-12' }, Spinner(8)) :
 
       !store.org ? Card([h('div', { class: 'p-8 max-w-md mx-auto text-center space-y-4' }, [

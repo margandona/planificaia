@@ -60,6 +60,7 @@ import {
   resolveFeatureFlags,
   userFlagBucket,
   resolveUserFeatureFlags,
+  normalizeFlagUpdate,
   TECH_AVAILABILITY_LEVELS,
   INTERNET_ACCESS_LEVELS,
   GROUP_EXPERIENCE_LEVELS,
@@ -1965,5 +1966,55 @@ describe('U17 - Despliegue gradual (rollout por uid y rollback por flag)', () =>
     const first = resolveUserFeatureFlags(source, 'uid-1');
     const second = resolveUserFeatureFlags(source, 'uid-1');
     expect(first.gamificationModuleEnabled).toBe(second.gamificationModuleEnabled);
+  });
+
+  test('admin SIEMPRE ve todo activado, incluso con la flag global apagada (rollback)', () => {
+    const flags = resolveUserFeatureFlags({ gamificationModuleEnabled: false, externalPromptGeneratorEnabled: false }, 'uid-admin', true);
+    expect(flags.gamificationModuleEnabled).toBe(true);
+    expect(flags.externalPromptGeneratorEnabled).toBe(true);
+  });
+
+  test('admin con flag global true y rollout 0 también ve todo activado', () => {
+    const flags = resolveUserFeatureFlags(
+      { gamificationModuleEnabled: true, rollout: { gamificationModuleEnabled: 0 } },
+      'uid-admin',
+      true
+    );
+    expect(flags.gamificationModuleEnabled).toBe(true);
+  });
+});
+
+describe('U17b - Panel de control de flags (admin)', () => {
+  test('normalizeFlagUpdate acepta booleanos, rollout 0-100 y allowlist de uids', () => {
+    const { errors, data } = normalizeFlagUpdate({
+      gamificationModuleEnabled: true,
+      methodologyRecommendationsEnabled: false,
+      rollout: { gamificationModuleEnabled: 25, externalPromptGeneratorEnabled: 100 },
+      allowlist: { externalPromptGeneratorEnabled: ['uid-1', 'uid-2'] },
+    });
+    expect(errors).toEqual([]);
+    expect(data.gamificationModuleEnabled).toBe(true);
+    expect(data.methodologyRecommendationsEnabled).toBe(false);
+    expect(data.rollout).toEqual({ gamificationModuleEnabled: 25, externalPromptGeneratorEnabled: 100 });
+    expect(data.allowlist.externalPromptGeneratorEnabled).toContain('uid-1');
+  });
+
+  test('normalizeFlagUpdate rechaza rollout fuera de rango y claves desconocidas', () => {
+    const { errors } = normalizeFlagUpdate({
+      flagInventada: true,
+      rollout: { gamificationModuleEnabled: 150 },
+      allowlist: { flagInventada: ['uid-1'] },
+    });
+    expect(errors).toEqual(expect.arrayContaining(['ROLLOUT_INVALIDO:gamificationModuleEnabled']));
+    expect(errors).toEqual(expect.arrayContaining(['ALLOW_DESCONOCIDO:flagInventada']));
+  });
+
+  test('normalizeFlagUpdate ignora tipos inválidos en flags booleanas y deja los rollout vacíos', () => {
+    const { errors, data } = normalizeFlagUpdate({ gamificationModuleEnabled: 'si', localContextEnabled: true });
+    expect(errors).toEqual([]);
+    expect(data.gamificationModuleEnabled).toBeUndefined();
+    expect(data.localContextEnabled).toBe(true);
+    expect(data.rollout).toBeUndefined();
+    expect(data.allowlist).toBeUndefined();
   });
 });

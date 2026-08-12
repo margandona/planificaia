@@ -28,7 +28,7 @@ export { updateDoc } from 'firebase/firestore';
 export { deleteDoc } from 'firebase/firestore';
 export { limit } from 'firebase/firestore';
 export { serverTimestamp } from 'firebase/firestore';
-import { createApp, ref, reactive, computed, onMounted, defineComponent, h, markRaw, shallowRef } from 'vue';
+import { createApp, ref, reactive, computed, watch, onMounted, defineComponent, h, markRaw, shallowRef } from 'vue';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, sendEmailVerification, updateProfile, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, limit, serverTimestamp } from 'firebase/firestore';
@@ -148,6 +148,7 @@ const acceptInviteFn = httpsCallable(fx, 'acceptInvite');
 const removeMemberFn = httpsCallable(fx, 'removeMember');
 const acceptTermsFn = httpsCallable(fx, 'acceptTerms');
 const setUserPlanFn = httpsCallable(fx, 'setUserPlan');
+const setFeatureFlagsFn = httpsCallable(fx, 'updateFeatureFlags');
 const createGamifiedExperienceFn = httpsCallable(fx, 'createGamifiedExperience');
 const generateGamificationDraftFn = httpsCallable(fx, 'generateGamificationDraft');
 const regenerateGamificationSectionFn = httpsCallable(fx, 'regenerateGamificationSection');
@@ -184,9 +185,10 @@ const userFlagBucket = (uid = '') => {
   return h % 100;
 };
 
-const resolveUserFeatureFlags = (source = {}, uid = '') => {
+const resolveUserFeatureFlags = (source = {}, uid = '', isAdmin = false) => {
   const out = {};
   for (const key of Object.keys(CLIENT_FEATURE_FLAGS)) {
+    if (isAdmin) { out[key] = true; continue; }
     if (source[key] !== true) { out[key] = false; continue; }
     const allowed = Array.isArray(source.allowlist?.[key]) ? source.allowlist[key].map(String) : [];
     if (uid && allowed.includes(String(uid))) { out[key] = true; continue; }
@@ -217,6 +219,9 @@ async function loadFeatureFlags() {
   featureFlagsDocAt = now;
   return featureFlagsDoc;
 }
+
+// U17b: invalida la caché local de flags después de guardar desde el panel admin.
+const clearFeatureFlagsCache = () => { featureFlagsDoc = null; featureFlagsDocAt = 0; };
 
 // ──────────── Términos y privacidad versionados (S-6 / RF-013) ────────────
 
@@ -360,13 +365,18 @@ const Layout = defineComponent({
   setup(props, { slots }) {
     const logout = async () => { await signOut(auth); store.user = null; store.profile = null; store.org = null; store.orgRole = null; store.claims = null; go('/'); };
     // U17 (DEPL-01): flags efectivas por usuario para el menú (rollout/allowlist).
+    // Solo se leen cuando hay sesión iniciada (las rutas públicas no abren Firestore).
     const userFlags = ref({ ...CLIENT_FEATURE_FLAGS });
-    onMounted(async () => {
+    const applyFlags = async (uid) => {
       try {
         const doc = await loadFeatureFlags();
-        userFlags.value = resolveUserFeatureFlags(doc, store.user?.uid || '');
-      } catch (e) { /* flags apagadas por defecto */ }
+        userFlags.value = resolveUserFeatureFlags(doc, uid, isAdmin());
+      } catch (e) { userFlags.value = { ...CLIENT_FEATURE_FLAGS }; }
+    };
+    watch(() => store.user?.uid, async (uid) => {
+      if (uid) await applyFlags(uid); else userFlags.value = { ...CLIENT_FEATURE_FLAGS };
     });
+    onMounted(async () => { if (store.user?.uid) await applyFlags(store.user.uid); });
 
     return () => h('div', { class: 'min-h-screen flex flex-col' }, [
       // Enlace de salto al contenido (WCAG 2.4.1 Bypass Blocks)
@@ -411,4 +421,4 @@ const Layout = defineComponent({
 });
 
 // Re-export de símbolos compartidos para los módulos de páginas (S-5.4).
-export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn, syncPlanningContextFn, loadFeatureFlags, resolveUserFeatureFlags };
+export { DEFAULT_SUBJECTS, PLANS, planLabel, store, auth, db, fx, LEVELS, LEVELS_BASICA, LEVELS_MEDIA, levelLabel, subjectLabel, activeSubjects, loadSubjectCatalog, go, guard, redirectAuth, mapError, Spinner, Alert, EmptyState, PageTitle, Card, Layout, perfTrace, reportError, generatePlanningFn, recommendMethodologiesFn, generateActivityVariantsFn, regenerateSectionFn, approvePlanningFn, exportPlanningFn, submitFeedbackFn, setUserRoleFn, createOrganizationFn, inviteMemberFn, acceptInviteFn, removeMemberFn, acceptTermsFn, setUserPlanFn, TERMS_VERSION, PRIVACY_VERSION, hasAcceptedTerms, isAdmin, isOrgAdmin, setFeatureFlagsFn, createGamifiedExperienceFn, generateGamificationDraftFn, regenerateGamificationSectionFn, joinGamifiedExperienceFn, submitMissionEvidenceFn, reviewMissionEvidenceFn, publishGamifiedExperienceFn, unpublishGamifiedExperienceFn, archiveGamifiedExperienceFn, computeExperienceProgressFn, generateExternalToolPromptFn, exportExternalPromptFn, syncPlanningContextFn, loadFeatureFlags, resolveUserFeatureFlags, clearFeatureFlagsCache };
