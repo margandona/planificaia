@@ -272,8 +272,8 @@ def test_participant_portal_accessibility():
     has_label_for_seudonimo = page.locator('label[for="seudonimo"]').count() == 1
 
     # Navegacion por teclado: Tab desde el primer campo enfoca los siguientes controles
-    page.locator('body').click()
-    page.keyboard.press('Tab')
+    # (se enfoca #codigo explicitamente: la card centrada queda bajo el punto de click de body)
+    page.evaluate("() => document.getElementById('codigo').focus()")
     focused_first = page.evaluate("() => document.activeElement && document.activeElement.id")
     page.keyboard.press('Tab')
     focused_second = page.evaluate("() => document.activeElement && document.activeElement.id")
